@@ -176,6 +176,10 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 # TAB 1: 트렌드 수집
 # ════════════════════════════════════════════════════════
 with tab1:
+    # 다른 탭에서 설정된 auto_proceed_tab 값 제거 (현재 탭에서만 유지)
+    if st.session_state.auto_proceed_tab != 0:
+        st.session_state.auto_proceed_tab = None
+
     st.markdown('<div class="step-header">📊 STEP 1 · 오늘의 트렌드 키워드 수집</div>', unsafe_allow_html=True)
 
     col1, col2 = st.columns([3, 1])
@@ -290,6 +294,10 @@ with tab1:
 # TAB 2: 주제 선정
 # ════════════════════════════════════════════════════════
 with tab2:
+    # 다른 탭에서 설정된 auto_proceed_tab 값 제거 (현재 탭에서만 유지)
+    if st.session_state.auto_proceed_tab != 1:
+        st.session_state.auto_proceed_tab = None
+
     st.markdown('<div class="step-header">🎯 STEP 2 · AI 주제 선정 및 제목 생성</div>', unsafe_allow_html=True)
 
     if not st.session_state.selected_keywords:
@@ -356,6 +364,10 @@ with tab2:
 # TAB 3: 콘텐츠 생성
 # ════════════════════════════════════════════════════════
 with tab3:
+    # 다른 탭에서 설정된 auto_proceed_tab 값 제거 (현재 탭에서만 유지)
+    if st.session_state.auto_proceed_tab != 2:
+        st.session_state.auto_proceed_tab = None
+
     st.markdown('<div class="step-header">✍️ STEP 3 · AI 블로그 본문 생성</div>', unsafe_allow_html=True)
 
     if not st.session_state.post_title:
@@ -445,6 +457,10 @@ with tab3:
 # TAB 4: 이미지 생성
 # ════════════════════════════════════════════════════════
 with tab4:
+    # 다른 탭에서 설정된 auto_proceed_tab 값 제거 (현재 탭에서만 유지)
+    if st.session_state.auto_proceed_tab != 3:
+        st.session_state.auto_proceed_tab = None
+
     st.markdown('<div class="step-header">🖼️ STEP 4 · 이미지 생성 및 삽입</div>', unsafe_allow_html=True)
 
     if not st.session_state.post_content_html:
@@ -510,6 +526,10 @@ with tab4:
 # TAB 5: 미리보기 & 발행
 # ════════════════════════════════════════════════════════
 with tab5:
+    # 다른 탭에서 설정된 auto_proceed_tab 값 제거 (현재 탭에서만 유지)
+    if st.session_state.auto_proceed_tab != 4:
+        st.session_state.auto_proceed_tab = None
+
     st.markdown('<div class="step-header">🚀 STEP 5 · 최종 미리보기 및 Google Blogger 발행</div>', unsafe_allow_html=True)
 
     final_html = st.session_state.final_html or st.session_state.post_content_html
