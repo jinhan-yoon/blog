@@ -150,18 +150,17 @@ def _auto_switch_tab(tab_index: int):
         height=0,
     )
 
-# 탭 자동 전환 비활성화 - 사용자가 명시적으로 "다음 단계로" 버튼 클릭해야 함
-# if st.session_state.auto_proceed_tab is not None:
-#     import time
-#     if not hasattr(st.session_state, '_tab_switched_at'):
-#         st.session_state._tab_switched_at = 0
-#
-#     current_time = time.time()
-#     if current_time - st.session_state._tab_switched_at > 0.5:
-#         _auto_switch_tab(st.session_state.auto_proceed_tab)
-#         st.session_state._tab_switched_at = current_time
-#         st.session_state.auto_proceed_tab = None
-st.session_state.auto_proceed_tab = None  # 항상 None으로 유지
+# 탭 자동 전환 - "다음 단계로" 버튼 클릭 시 해당 탭으로 자동 이동
+if st.session_state.auto_proceed_tab is not None:
+    import time
+    if not hasattr(st.session_state, '_tab_switched_at'):
+        st.session_state._tab_switched_at = 0
+
+    current_time = time.time()
+    if current_time - st.session_state._tab_switched_at > 0.3:
+        _auto_switch_tab(st.session_state.auto_proceed_tab)
+        st.session_state._tab_switched_at = current_time
+        st.session_state.auto_proceed_tab = None
 
 # ── 탭 구성 ──────────────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
