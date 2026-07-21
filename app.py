@@ -385,7 +385,7 @@ with tab3:
                     st.session_state.post_tags = result.get("tags", [])
                     st.session_state.image_prompts = result.get("image_prompts", [])
                     st.session_state.step = max(st.session_state.step, 4)
-                    st.session_state.auto_proceed_tab = 3   # 이미지 삽입 탭(index 3)으로 이동
+                    st.session_state.auto_proceed_tab = None  # 자동 탭 전환 초기화
                 except Exception as e:
                     st.error(f"오류: {e}")
             st.rerun()
@@ -481,7 +481,7 @@ with tab4:
                         st.session_state.image_urls,
                     )
                     st.session_state.step = max(st.session_state.step, 5)
-                    st.session_state.auto_proceed_tab = 4   # 미리보기 탭(index 4)으로 이동
+                    st.session_state.auto_proceed_tab = None  # 자동 탭 전환 초기화
                     st.success("✅ 이미지 삽입 완료!")
                 except Exception as e:
                     st.error(f"오류: {e}")
