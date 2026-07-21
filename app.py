@@ -165,25 +165,53 @@ with tab1:
     if st.session_state.trends:
         trends = st.session_state.trends
 
-        # 소스별 탭
-        src_tab1, src_tab2, src_tab3, src_tab4 = st.tabs([
-            f"🌐 통합 ({len(trends['merged'])}개)",
-            f"Google ({len(trends['google'])}개)",
-            f"Naver ({len(trends['naver'])}개)",
-            f"Daum ({len(trends['daum'])}개)",
+        # ── 수집된 키워드 리스트 표시 ──────────────────────────────────────
+        col_n, col_g = st.columns(2)
+
+        with col_n:
+            st.markdown("#### 🟢 네이버 실시간 검색어")
+            naver_kws = trends.get("naver", [])
+            if naver_kws:
+                for kw in naver_kws[:20]:
+                    caret_icon = {"NEW": "🆕", "Up": "🔺", "Down": "🔻"}.get(kw.get("caret", ""), "➖")
+                    st.markdown(
+                        f"`{str(kw['rank']).zfill(2)}` {caret_icon} **{kw['keyword']}**"
+                    )
+            else:
+                st.info("네이버 데이터 없음")
+
+        with col_g:
+            st.markdown("#### 🔴 구글 실시간 검색어")
+            google_kws = trends.get("google", [])
+            if google_kws:
+                for kw in google_kws[:20]:
+                    traffic = kw.get("traffic", "")
+                    traffic_str = f"  `{traffic}`" if traffic and traffic != "N/A" else ""
+                    st.markdown(f"`{str(kw['rank']).zfill(2)}` **{kw['keyword']}**{traffic_str}")
+            else:
+                st.info("구글 데이터 없음")
+
+        st.divider()
+
+        # ── 소스별 탭 (선택 + 상세) ─────────────────────────────────────
+        src_tab1, src_tab2, src_tab3 = st.tabs([
+            f"✅ 통합 선택 ({len(trends['merged'])}개)",
+            f"🟢 네이버 상세 ({len(trends['naver'])}개)",
+            f"🔴 구글 상세 ({len(trends['google'])}개)",
         ])
 
         with src_tab1:
             st.markdown("**키워드를 선택하여 다음 단계로 진행하세요**")
             merged = trends["merged"]
 
-            # 선택된 키워드 관리
             selected = []
             cols = st.columns(3)
             for i, kw in enumerate(merged):
                 with cols[i % 3]:
+                    caret = f" {kw.get('caret', '')}" if kw.get("caret") else ""
+                    label = f"**{kw['keyword']}**  \n`{kw['source']}`{caret} · {kw['traffic']}"
                     checked = st.checkbox(
-                        f"**{kw['keyword']}**  \n`{kw['source']}` · {kw['traffic']}",
+                        label,
                         key=f"kw_{i}",
                         value=kw["keyword"] in st.session_state.selected_keywords,
                     )
@@ -197,31 +225,29 @@ with tab1:
                 st.markdown(f"**선택된 키워드 ({len(selected)}개):**")
                 chips = " ".join([f'<span class="keyword-chip">{k}</span>' for k in selected])
                 st.markdown(chips, unsafe_allow_html=True)
-
                 if st.button("→ 주제 선정으로 이동", type="primary"):
                     st.session_state.step = max(st.session_state.step, 2)
                     st.info("'주제 선정' 탭으로 이동하세요.")
 
         with src_tab2:
-            for kw in trends["google"]:
-                if not kw.get("error"):
-                    with st.expander(f"🔴 {kw['keyword']}  ({kw['traffic']})"):
-                        for news in kw.get("related_news", []):
-                            st.caption(f"• {news}")
-
-        with src_tab3:
             if trends["naver"]:
                 for kw in trends["naver"]:
-                    st.write(f"#{kw['rank']} **{kw['keyword']}**")
+                    caret_icon = {"NEW": "🆕", "Up": "🔺", "Down": "🔻"}.get(kw.get("caret", ""), "➖")
+                    st.write(f"`#{kw['rank']}` {caret_icon} **{kw['keyword']}**")
             else:
-                st.info("네이버 트렌드를 가져올 수 없습니다. (구조 변경 또는 차단)")
+                st.info("네이버 트렌드 데이터 없음")
 
-        with src_tab4:
-            if trends["daum"]:
-                for kw in trends["daum"]:
-                    st.write(f"#{kw['rank']} **{kw['keyword']}**")
-            else:
-                st.info("다음 트렌드를 가져올 수 없습니다.")
+        with src_tab3:
+            for kw in trends["google"]:
+                if not kw.get("error"):
+                    with st.expander(
+                        f"`#{kw['rank']}` **{kw['keyword']}**"
+                        + (f"  ({kw.get('traffic', '')})" if kw.get("traffic") else "")
+                    ):
+                        for news in kw.get("related_news", []):
+                            st.caption(f"• {news}")
+                        if not kw.get("related_news"):
+                            st.caption("관련 뉴스 없음")
 
 # ════════════════════════════════════════════════════════
 # TAB 2: 주제 선정
