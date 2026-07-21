@@ -151,8 +151,16 @@ def _auto_switch_tab(tab_index: int):
     )
 
 if st.session_state.auto_proceed_tab is not None:
-    _auto_switch_tab(st.session_state.auto_proceed_tab)
-    st.session_state.auto_proceed_tab = None
+    import time
+    # 탭 자동 전환 (button 클릭 후 한 번만 실행)
+    if not hasattr(st.session_state, '_tab_switched_at'):
+        st.session_state._tab_switched_at = 0
+
+    current_time = time.time()
+    if current_time - st.session_state._tab_switched_at > 0.5:  # 0.5초 이상 경과 시만
+        _auto_switch_tab(st.session_state.auto_proceed_tab)
+        st.session_state._tab_switched_at = current_time
+        st.session_state.auto_proceed_tab = None
 
 # ── 탭 구성 ──────────────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -242,6 +250,10 @@ with tab1:
                     if checked:
                         selected.append(kw["keyword"])
 
+            # checkbox 변경 감지: 버튼 클릭이 아니면 auto_proceed_tab 초기화
+            if selected != st.session_state.selected_keywords:
+                st.session_state.auto_proceed_tab = None
+
             st.session_state.selected_keywords = selected
 
             if selected:
@@ -325,6 +337,9 @@ with tab2:
             # 직접 입력
             st.markdown("**또는 직접 제목 입력:**")
             custom_title = st.text_input("사용자 정의 제목", value=st.session_state.post_title)
+            # 입력 필드 변경 감지: 버튼 클릭이 아니면 auto_proceed_tab 초기화
+            if custom_title != st.session_state.post_title:
+                st.session_state.auto_proceed_tab = None
             if custom_title:
                 st.session_state.post_title = custom_title
 
@@ -384,6 +399,9 @@ with tab3:
                     value=st.session_state.post_content_html,
                     height=400,
                 )
+                # 입력 필드 변경 감지: 버튼 클릭이 아니면 auto_proceed_tab 초기화
+                if edited_html != st.session_state.post_content_html:
+                    st.session_state.auto_proceed_tab = None
                 st.session_state.post_content_html = edited_html
 
                 # AI로 수정 요청
@@ -443,6 +461,9 @@ with tab4:
             current_prompt = st.session_state.image_prompts[i] if i < len(st.session_state.image_prompts) else ""
             edited = st.text_input(f"이미지 {i+1} 설명", value=current_prompt, key=f"img_prompt_{i}")
             edited_prompts.append(edited)
+        # 입력 필드 변경 감지: 버튼 클릭이 아니면 auto_proceed_tab 초기화
+        if edited_prompts != st.session_state.image_prompts:
+            st.session_state.auto_proceed_tab = None
         st.session_state.image_prompts = edited_prompts
 
         gen_img_btn = st.button("🖼️ 이미지 생성 & 본문 삽입", type="primary")
@@ -513,7 +534,12 @@ with tab5:
             st.markdown("**🚀 발행 설정**")
 
             final_title = st.text_input("제목 최종 확인", value=title)
+            # 입력 필드 변경 감지: 버튼 클릭이 아니면 auto_proceed_tab 초기화
+            if final_title != title:
+                st.session_state.auto_proceed_tab = None
+
             is_draft = st.checkbox("임시저장으로 발행 (바로 공개하지 않음)", value=False)
+            st.session_state.auto_proceed_tab = None  # 체크박스 변경 시 auto_proceed_tab 초기화
 
             st.divider()
 
