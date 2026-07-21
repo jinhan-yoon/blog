@@ -1,42 +1,62 @@
-name: Deploy Streamlit App to Production
+name: Deploy Blog to Production Server
 
-# main 브랜치에 Push되거나 PR이 합쳐질 때 실행
 on:
   push:
     branches: [ "main" ]
 
 jobs:
-  # 1단계: 코드 및 의존성 테스트 (CI)
-  test-and-lint:
+  # ── 1단계: 문법 검증 ─────────────────────────────────────────
+  validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
           cache: "pip"
 
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-      - name: Validate Streamlit App Syntax
-        run: |
-          # app.py 파일 문법 오류 검증
-          python -m py_compile app.py
+      - name: Validate app.py syntax
+        run: python -m py_compile app.py && echo "✅ app.py OK"
 
-  # 2단계: 자동 배포 트리거 (CD)
+      - name: Validate modules syntax
+        run: |
+          for f in modules/*.py; do
+            python -m py_compile "$f" && echo "✅ $f OK"
+          done
+
+  # ── 2단계: 서버 배포 ─────────────────────────────────────────
   deploy:
-    needs: test-and-lint
+    needs: validate
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Render Deployment Webhook
-        env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
-        run: |
-          # Render 배포 훅 URL로 POST 요청 전송
-          curl -X POST "$RENDER_DEPLOY_HOOK"
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            set -e
+            DEPLOY_PATH="${{ secrets.DEPLOY_PATH }}"
+
+            echo "=== 코드 업데이트 ==="
+            cd "$DEPLOY_PATH"
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "=== 의존성 설치 ==="
+            if [ ! -d venv ]; then
+              python3 -m venv venv
+            fi
+            venv/bin/pip install -q --upgrade pip
+            venv/bin/pip install -q -r requirements.txt
+
+            echo "=== 서비스 재시작 ==="
+            sudo systemctl restart blog-streamlit.service
+            sleep 3
+            sudo systemctl is-active blog-streamlit.service && echo "✅ 서비스 정상 실행"

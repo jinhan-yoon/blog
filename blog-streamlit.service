@@ -1,0 +1,19 @@
+[Unit]
+Description=AI Blog Automation Dashboard (Streamlit)
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/blog
+ExecStart=/home/%i/blog/venv/bin/streamlit run app.py \
+          --server.port 8501 \
+          --server.address 0.0.0.0 \
+          --server.headless true \
+          --browser.gatherUsageStats false
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=/home/%i/blog/.env
+
+[Install]
+WantedBy=multi-user.target
