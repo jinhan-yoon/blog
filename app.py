@@ -118,17 +118,17 @@ with st.sidebar:
     st.divider()
 
     # API 상태 표시
-    gemini_ok = bool(os.getenv("GEMINI_API_KEY", ""))
+    llm_ok = bool(os.getenv("LLM_ADDR", ""))
     blogger_ok = bool(os.getenv("BLOGGER_BLOG_ID", ""))
     image_provider = os.getenv("IMAGE_PROVIDER", "pollinations")
 
     st.caption("**API 연결 상태**")
-    st.write(f"{'✅' if gemini_ok else '❌'} Gemini API")
+    st.write(f"{'✅' if llm_ok else '❌'} vLLM 서버 ({os.getenv('LLM_ADDR', '미설정')})")
     st.write(f"{'✅' if blogger_ok else '❌'} Blogger ID")
     st.write(f"🖼️ 이미지: {image_provider.upper()}")
 
-    if not gemini_ok:
-        st.warning("⚙️ 설정 탭에서 API 키를 입력해주세요.")
+    if not llm_ok:
+        st.warning("⚙️ 설정 탭에서 LLM 서버 주소를 입력해주세요.")
 
 # ── 탭 구성 ──────────────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -268,15 +268,12 @@ with tab2:
             suggest_btn = st.button("🤖 주제 추천 받기", type="primary", use_container_width=True)
 
         if suggest_btn:
-            if not os.getenv("GEMINI_API_KEY"):
-                st.error("❌ Gemini API 키가 없습니다. 설정 탭에서 입력해주세요.")
-            else:
-                with st.spinner("Gemini AI가 주제를 분석 중..."):
-                    try:
-                        from modules.content_generator import suggest_topics
-                        st.session_state.topics = suggest_topics(selected_kws, topic_count)
-                    except Exception as e:
-                        st.error(f"오류: {e}")
+            with st.spinner("vLLM이 주제를 분석 중..."):
+                try:
+                    from modules.content_generator import suggest_topics
+                    st.session_state.topics = suggest_topics(selected_kws, topic_count)
+                except Exception as e:
+                    st.error(f"오류: {e}")
 
         if st.session_state.topics:
             st.divider()
@@ -327,11 +324,8 @@ with tab3:
             gen_btn = st.button("🤖 본문 생성", type="primary", use_container_width=True)
 
         if gen_btn:
-            if not os.getenv("GEMINI_API_KEY"):
-                st.error("❌ Gemini API 키가 없습니다.")
-            else:
-                kws = [k.strip() for k in extra_kw.split(",") if k.strip()]
-                with st.spinner("Gemini AI가 본문을 작성 중... (약 20-40초 소요)"):
+            kws = [k.strip() for k in extra_kw.split(",") if k.strip()]
+            with st.spinner("vLLM이 본문을 작성 중... (약 20-40초 소요)"):
                     try:
                         from modules.content_generator import generate_blog_post
                         result = generate_blog_post(st.session_state.post_title, kws, tone)
