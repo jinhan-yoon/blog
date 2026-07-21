@@ -282,17 +282,17 @@ with tab2:
         with col2:
             suggest_btn = st.button("🤖 주제 추천 받기", type="primary", use_container_width=True)
 
-        topics = []
         if suggest_btn:
             with st.spinner("vLLM이 주제를 분석 중..."):
                 try:
                     from modules.content_generator import suggest_topics
                     topics = suggest_topics(selected_kws, topic_count)
+                    st.session_state.topics = topics
+                    st.success(f"✅ {len(topics)}개 주제가 추천되었습니다!")
                 except Exception as e:
                     st.error(f"오류: {e}")
-            if topics:
-                st.success(f"✅ {len(topics)}개 주제가 추천되었습니다!")
-                st.rerun()
+                    st.session_state.topics = None
+            st.rerun()
 
         # 이전에 추천받은 주제가 있으면 표시
         topic_container = st.container()
