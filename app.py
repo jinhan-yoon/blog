@@ -1,10 +1,11 @@
-"""AI 블로그 자동화 대시보드 - Streamlit 메인 앱"""
+"""AI 블로그 자동화 대시보드 - 기능별 재구성 버전"""
 
 import os
 import json
 import streamlit as st
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv
 from pathlib import Path
+from datetime import datetime
 
 load_dotenv()
 
@@ -77,20 +78,29 @@ st.markdown("""
 # ── 세션 초기화 ──────────────────────────────────────────────────────────────
 def init_session():
     defaults = {
+        # 트렌드 관련
         "trends": None,
+        "trends_history": {},
         "selected_keywords": [],
-        "topics": [],
-        "selected_topic": None,
+
+        # 콘텐츠 작성 관련
+        "post_topic": None,
         "post_title": "",
         "post_content_html": "",
         "post_meta_desc": "",
         "post_tags": [],
         "image_prompts": [],
+
+        # 미디어 관련
         "image_urls": [],
         "final_html": "",
+
+        # 발행 관련
         "publish_result": None,
-        "step": 1,
-        "auto_proceed_tab": None,   # 자동 이동할 탭 인덱스 (0-base)
+        "publish_history": [],
+
+        # UI 상태
+        "content_mode": "create",  # "create" 또는 "edit"
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -105,21 +115,13 @@ with st.sidebar:
 
     st.divider()
 
-    # 진행 단계 표시
-    steps = [
-        ("📊", "트렌드 수집"),
-        ("🎯", "주제 선정"),
-        ("✍️", "콘텐츠 생성"),
-        ("🖼️", "이미지 생성"),
-        ("🚀", "발행"),
-    ]
-    for i, (icon, label) in enumerate(steps, 1):
-        if i == st.session_state.step:
-            st.markdown(f"**→ {icon} {i}. {label}** ✅")
-        elif i < st.session_state.step:
-            st.markdown(f"~~{icon} {i}. {label}~~ ✓")
-        else:
-            st.markdown(f"{icon} {i}. {label}")
+    # 진행 상황 요약
+    st.markdown("### 📋 진행 상황")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("선택된 키워드", len(st.session_state.selected_keywords))
+    with col2:
+        st.metric("작성된 글", "✓" if st.session_state.post_title else "✗")
 
     st.divider()
 
@@ -136,39 +138,12 @@ with st.sidebar:
     if not llm_ok:
         st.warning("⚙️ 설정 탭에서 LLM 서버 주소를 입력해주세요.")
 
-# ── 탭 자동전환 헬퍼 ─────────────────────────────────────────────────────────
-def _auto_switch_tab(tab_index: int):
-    """JavaScript로 지정한 인덱스의 탭을 클릭 (0-base)"""
-    import streamlit.components.v1 as components
-    components.html(
-        f"""<script>
-        setTimeout(function() {{
-            var tabs = window.parent.document.querySelectorAll('button[role="tab"]');
-            if (tabs.length > {tab_index}) tabs[{tab_index}].click();
-        }}, 300);
-        </script>""",
-        height=0,
-    )
-
-# 탭 자동 전환 - "다음 단계로" 버튼 클릭 시 해당 탭으로 자동 이동
-if st.session_state.auto_proceed_tab is not None:
-    import time
-    if not hasattr(st.session_state, '_tab_switched_at'):
-        st.session_state._tab_switched_at = 0
-
-    current_time = time.time()
-    if current_time - st.session_state._tab_switched_at > 0.3:
-        _auto_switch_tab(st.session_state.auto_proceed_tab)
-        st.session_state._tab_switched_at = current_time
-        st.session_state.auto_proceed_tab = None
-
 # ── 탭 구성 ──────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 트렌드 수집",
-    "🎯 주제 선정",
-    "✍️ 콘텐츠 생성",
-    "🖼️ 이미지 삽입",
-    "🚀 미리보기 & 발행",
+    "✍️ 콘텐츠 작성",
+    "🎨 미디어",
+    "🚀 발행",
     "⚙️ 설정",
 ])
 
@@ -176,11 +151,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 # TAB 1: 트렌드 수집
 # ════════════════════════════════════════════════════════
 with tab1:
-    # 다른 탭에서 설정된 auto_proceed_tab 값 제거 (현재 탭에서만 유지)
-    if st.session_state.auto_proceed_tab != 0:
-        st.session_state.auto_proceed_tab = None
-
-    st.markdown('<div class="step-header">📊 STEP 1 · 오늘의 트렌드 키워드 수집</div>', unsafe_allow_html=True)
+    st.markdown('<div class="step-header">📊 트렌드 수집 및 관리</div>', unsafe_allow_html=True)
 
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -210,9 +181,7 @@ with tab1:
             if naver_kws:
                 for kw in naver_kws[:20]:
                     caret_icon = {"NEW": "🆕", "Up": "🔺", "Down": "🔻"}.get(kw.get("caret", ""), "➖")
-                    st.markdown(
-                        f"`{str(kw['rank']).zfill(2)}` {caret_icon} **{kw['keyword']}**"
-                    )
+                    st.markdown(f"`{str(kw['rank']).zfill(2)}` {caret_icon} **{kw['keyword']}**")
             else:
                 st.info("네이버 데이터 없음")
 
@@ -229,80 +198,46 @@ with tab1:
 
         st.divider()
 
-        # ── 소스별 탭 (선택 + 상세) ─────────────────────────────────────
-        src_tab1, src_tab2, src_tab3 = st.tabs([
-            f"✅ 통합 선택 ({len(trends['merged'])}개)",
-            f"🟢 네이버 상세 ({len(trends['naver'])}개)",
-            f"🔴 구글 상세 ({len(trends['google'])}개)",
-        ])
+        # ── 키워드 선택 ────────────────────────────────────────────────────
+        st.markdown("**📌 콘텐츠 작성에 사용할 키워드를 선택하세요:**")
+        merged = trends["merged"]
 
-        with src_tab1:
-            st.markdown("**키워드를 선택하여 다음 단계로 진행하세요**")
-            merged = trends["merged"]
+        selected = []
+        cols = st.columns(3)
+        for i, kw in enumerate(merged):
+            with cols[i % 3]:
+                caret = f" {kw.get('caret', '')}" if kw.get("caret") else ""
+                label = f"**{kw['keyword']}**  \n`{kw['source']}`{caret} · {kw['traffic']}"
+                checked = st.checkbox(
+                    label,
+                    key=f"kw_{i}",
+                    value=kw["keyword"] in st.session_state.selected_keywords,
+                )
+                if checked:
+                    selected.append(kw["keyword"])
 
-            selected = []
-            cols = st.columns(3)
-            for i, kw in enumerate(merged):
-                with cols[i % 3]:
-                    caret = f" {kw.get('caret', '')}" if kw.get("caret") else ""
-                    label = f"**{kw['keyword']}**  \n`{kw['source']}`{caret} · {kw['traffic']}"
-                    checked = st.checkbox(
-                        label,
-                        key=f"kw_{i}",
-                        value=kw["keyword"] in st.session_state.selected_keywords,
-                    )
-                    if checked:
-                        selected.append(kw["keyword"])
+        st.session_state.selected_keywords = selected
 
-            # checkbox 변경 감지: 버튼 클릭이 아니면 auto_proceed_tab 초기화
-            if selected != st.session_state.selected_keywords:
-                st.session_state.auto_proceed_tab = None
-
-            st.session_state.selected_keywords = selected
-
-            if selected:
-                st.divider()
-                st.markdown(f"**선택된 키워드 ({len(selected)}개):**")
-                chips = " ".join([f'<span class="keyword-chip">{k}</span>' for k in selected])
-                st.markdown(chips, unsafe_allow_html=True)
-                if st.button("🎯 주제 선정으로 이동 →", type="primary", use_container_width=True):
-                    st.session_state.step = max(st.session_state.step, 2)
-                    st.session_state.auto_proceed_tab = 1
-                    st.rerun()
-
-        with src_tab2:
-            if trends["naver"]:
-                for kw in trends["naver"]:
-                    caret_icon = {"NEW": "🆕", "Up": "🔺", "Down": "🔻"}.get(kw.get("caret", ""), "➖")
-                    st.write(f"`#{kw['rank']}` {caret_icon} **{kw['keyword']}**")
-            else:
-                st.info("네이버 트렌드 데이터 없음")
-
-        with src_tab3:
-            for kw in trends["google"]:
-                if not kw.get("error"):
-                    with st.expander(
-                        f"`#{kw['rank']}` **{kw['keyword']}**"
-                        + (f"  ({kw.get('traffic', '')})" if kw.get("traffic") else "")
-                    ):
-                        for news in kw.get("related_news", []):
-                            st.caption(f"• {news}")
-                        if not kw.get("related_news"):
-                            st.caption("관련 뉴스 없음")
+        if selected:
+            st.divider()
+            st.markdown(f"**선택된 키워드 ({len(selected)}개):**")
+            chips = " ".join([f'<span class="keyword-chip">{k}</span>' for k in selected])
+            st.markdown(chips, unsafe_allow_html=True)
 
 # ════════════════════════════════════════════════════════
-# TAB 2: 주제 선정
+# TAB 2: 콘텐츠 작성 (주제 선정 + 본문 생성 통합)
 # ════════════════════════════════════════════════════════
 with tab2:
-    # 다른 탭에서 설정된 auto_proceed_tab 값 제거 (현재 탭에서만 유지)
-    if st.session_state.auto_proceed_tab != 1:
-        st.session_state.auto_proceed_tab = None
-
-    st.markdown('<div class="step-header">🎯 STEP 2 · AI 주제 선정 및 제목 생성</div>', unsafe_allow_html=True)
+    st.markdown('<div class="step-header">✍️ 콘텐츠 작성</div>', unsafe_allow_html=True)
 
     if not st.session_state.selected_keywords:
-        st.markdown('<div class="warn-box">⚠️ 먼저 트렌드 탭에서 키워드를 선택해주세요.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="warn-box">⚠️ 먼저 "트렌드 수집" 탭에서 키워드를 선택해주세요.</div>', unsafe_allow_html=True)
     else:
+        # ────────────────────────────────────────────────────────────────
+        # STEP 1: 주제 선정 섹션
+        # ────────────────────────────────────────────────────────────────
+        st.markdown("### 🎯 STEP 1: 주제 선정")
+
         selected_kws = st.session_state.selected_keywords
         st.markdown(f"**선택된 키워드:** {', '.join(selected_kws)}")
 
@@ -312,22 +247,27 @@ with tab2:
         with col2:
             suggest_btn = st.button("🤖 주제 추천 받기", type="primary", use_container_width=True)
 
+        topics = []
         if suggest_btn:
             with st.spinner("vLLM이 주제를 분석 중..."):
                 try:
                     from modules.content_generator import suggest_topics
-                    st.session_state.topics = suggest_topics(selected_kws, topic_count)
-                    st.session_state.auto_proceed_tab = None  # 자동 탭 전환 초기화
+                    topics = suggest_topics(selected_kws, topic_count)
                 except Exception as e:
                     st.error(f"오류: {e}")
-            st.rerun()  # 주제 추천 완료 후 화면 업데이트
+            if topics:
+                st.success(f"✅ {len(topics)}개 주제가 추천되었습니다!")
+                st.rerun()
 
-        if st.session_state.topics:
-            st.divider()
-            st.markdown("**추천 주제 목록 (하나를 선택하세요)**")
+        # 이전에 추천받은 주제가 있으면 표시
+        topic_container = st.container()
+        with topic_container:
+            if 'topics' in st.session_state and st.session_state.topics:
+                topics = st.session_state.topics
+                st.divider()
+                st.markdown("**추천 주제 목록:**")
 
-            for i, topic in enumerate(st.session_state.topics):
-                with st.container():
+                for i, topic in enumerate(topics):
                     col1, col2 = st.columns([5, 1])
                     with col1:
                         st.markdown(f"**{i+1}. {topic['title']}**")
@@ -336,135 +276,109 @@ with tab2:
                         chips = " ".join([f'<span class="keyword-chip">{k}</span>' for k in topic.get("keywords", [])])
                         st.markdown(chips, unsafe_allow_html=True)
                     with col2:
-                        if st.button("선택", key=f"topic_{i}", use_container_width=True):
-                            st.session_state.selected_topic = topic
+                        if st.button("📝 선택", key=f"topic_{i}", use_container_width=True):
+                            st.session_state.post_topic = topic
                             st.session_state.post_title = topic["title"]
-                            st.session_state.step = max(st.session_state.step, 3)
-                            st.session_state.auto_proceed_tab = 2   # 콘텐츠 생성 탭(index 2)으로 이동
+                            st.session_state.topics = None  # 주제 목록 초기화
+                            st.success("주제가 선택되었습니다!")
                             st.rerun()
                     st.divider()
 
-            # 직접 입력
-            st.markdown("**또는 직접 제목 입력:**")
-            custom_title = st.text_input("사용자 정의 제목", value=st.session_state.post_title)
-            # 입력 필드 변경 감지: 버튼 클릭이 아니면 auto_proceed_tab 초기화
-            if custom_title != st.session_state.post_title:
-                st.session_state.auto_proceed_tab = None
-            if custom_title:
-                st.session_state.post_title = custom_title
+                # 직접 입력 옵션
+                with st.expander("또는 직접 제목 입력"):
+                    custom_title = st.text_input("사용자 정의 제목", value=st.session_state.post_title)
+                    if custom_title and custom_title != st.session_state.post_title:
+                        st.session_state.post_title = custom_title
+                        st.success("제목이 입력되었습니다!")
+                        st.rerun()
 
-            if st.session_state.post_title:
-                st.divider()
-                if st.button("✍️ 콘텐츠 생성으로 이동 →", type="primary", use_container_width=True):
-                    st.session_state.step = max(st.session_state.step, 3)
-                    st.session_state.auto_proceed_tab = 2
-                    st.rerun()
-
-# ════════════════════════════════════════════════════════
-# TAB 3: 콘텐츠 생성
-# ════════════════════════════════════════════════════════
-with tab3:
-    # 다른 탭에서 설정된 auto_proceed_tab 값 제거 (현재 탭에서만 유지)
-    if st.session_state.auto_proceed_tab != 2:
-        st.session_state.auto_proceed_tab = None
-
-    st.markdown('<div class="step-header">✍️ STEP 3 · AI 블로그 본문 생성</div>', unsafe_allow_html=True)
-
-    if not st.session_state.post_title:
-        st.markdown('<div class="warn-box">⚠️ 주제 선정 탭에서 제목을 먼저 선택해주세요.</div>', unsafe_allow_html=True)
-    else:
-        st.markdown(f"**선택된 제목:** {st.session_state.post_title}")
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            tone = st.selectbox("톤앤매너", ["정보전달", "친근한", "전문적", "뉴스형"])
-        with col2:
-            topic_kws = st.session_state.selected_topic.get("keywords", []) if st.session_state.selected_topic else st.session_state.selected_keywords
-            extra_kw = st.text_input("추가 키워드 (쉼표 구분)", value=", ".join(topic_kws))
-        with col3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            gen_btn = st.button("🤖 본문 생성", type="primary", use_container_width=True)
-
-        if gen_btn:
-            kws = [k.strip() for k in extra_kw.split(",") if k.strip()]
-            with st.spinner("vLLM이 본문을 작성 중... (약 20-40초 소요)"):
-                try:
-                    from modules.content_generator import generate_blog_post
-                    result = generate_blog_post(st.session_state.post_title, kws, tone)
-                    st.session_state.post_title = result.get("title", st.session_state.post_title)
-                    st.session_state.post_content_html = result.get("content_html", "")
-                    st.session_state.post_meta_desc = result.get("meta_description", "")
-                    st.session_state.post_tags = result.get("tags", [])
-                    st.session_state.image_prompts = result.get("image_prompts", [])
-                    st.session_state.step = max(st.session_state.step, 4)
-                    st.session_state.auto_proceed_tab = None  # 자동 탭 전환 초기화
-                except Exception as e:
-                    st.error(f"오류: {e}")
-            st.rerun()
-
-        if st.session_state.post_content_html:
+        # ────────────────────────────────────────────────────────────────
+        # STEP 2: 본문 생성 섹션
+        # ────────────────────────────────────────────────────────────────
+        if st.session_state.post_title:
             st.divider()
+            st.markdown("### ✍️ STEP 2: 본문 생성")
 
-            col1, col2 = st.columns([1, 1])
+            st.markdown(f"**선택된 제목:** {st.session_state.post_title}")
+
+            col1, col2, col3 = st.columns(3)
             with col1:
-                st.markdown("**📝 본문 편집**")
-                edited_html = st.text_area(
-                    "HTML 본문 (직접 수정 가능)",
-                    value=st.session_state.post_content_html,
-                    height=400,
-                )
-                # 입력 필드 변경 감지: 버튼 클릭이 아니면 auto_proceed_tab 초기화
-                if edited_html != st.session_state.post_content_html:
-                    st.session_state.auto_proceed_tab = None
-                st.session_state.post_content_html = edited_html
-
-                # AI로 수정 요청
-                refine_instruction = st.text_input("✏️ AI에게 수정 요청 (예: '더 친근하게 바꿔줘', '길이를 늘려줘')")
-                if st.button("🤖 AI 수정 적용") and refine_instruction:
-                    with st.spinner("수정 중..."):
-                        try:
-                            from modules.content_generator import refine_content
-                            st.session_state.post_content_html = refine_content(edited_html, refine_instruction)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"오류: {e}")
-
+                tone = st.selectbox("톤앤매너", ["정보전달", "친근한", "전문적", "뉴스형"])
             with col2:
-                st.markdown("**👁️ 미리보기**")
-                st.markdown(
-                    f'<div class="post-preview">'
-                    f'<h2>{st.session_state.post_title}</h2>'
-                    f'{st.session_state.post_content_html}'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
+                topic_kws = st.session_state.post_topic.get("keywords", []) if st.session_state.post_topic else st.session_state.selected_keywords
+                extra_kw = st.text_input("추가 키워드 (쉼표 구분)", value=", ".join(topic_kws))
+            with col3:
+                st.markdown("<br>", unsafe_allow_html=True)
+                gen_btn = st.button("🤖 본문 생성", type="primary", use_container_width=True)
 
-            st.divider()
-            col1, col2 = st.columns(2)
-            with col1:
-                tags_input = st.text_input("태그 (쉼표 구분)", value=", ".join(st.session_state.post_tags))
-                st.session_state.post_tags = [t.strip() for t in tags_input.split(",") if t.strip()]
-            with col2:
-                meta_desc = st.text_area("메타 설명 (SEO)", value=st.session_state.post_meta_desc, height=80)
-                st.session_state.post_meta_desc = meta_desc
-
-            st.divider()
-            if st.button("🖼️ 이미지 삽입으로 이동 →", type="primary", use_container_width=True):
-                st.session_state.auto_proceed_tab = 3
+            if gen_btn:
+                kws = [k.strip() for k in extra_kw.split(",") if k.strip()]
+                with st.spinner("vLLM이 본문을 작성 중... (약 20-40초 소요)"):
+                    try:
+                        from modules.content_generator import generate_blog_post
+                        result = generate_blog_post(st.session_state.post_title, kws, tone)
+                        st.session_state.post_title = result.get("title", st.session_state.post_title)
+                        st.session_state.post_content_html = result.get("content_html", "")
+                        st.session_state.post_meta_desc = result.get("meta_description", "")
+                        st.session_state.post_tags = result.get("tags", [])
+                        st.session_state.image_prompts = result.get("image_prompts", [])
+                        st.success("✅ 본문이 생성되었습니다!")
+                    except Exception as e:
+                        st.error(f"오류: {e}")
                 st.rerun()
 
-# ════════════════════════════════════════════════════════
-# TAB 4: 이미지 생성
-# ════════════════════════════════════════════════════════
-with tab4:
-    # 다른 탭에서 설정된 auto_proceed_tab 값 제거 (현재 탭에서만 유지)
-    if st.session_state.auto_proceed_tab != 3:
-        st.session_state.auto_proceed_tab = None
+            # 본문 편집
+            if st.session_state.post_content_html:
+                st.divider()
 
-    st.markdown('<div class="step-header">🖼️ STEP 4 · 이미지 생성 및 삽입</div>', unsafe_allow_html=True)
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    st.markdown("**📝 본문 편집**")
+                    edited_html = st.text_area(
+                        "HTML 본문 (직접 수정 가능)",
+                        value=st.session_state.post_content_html,
+                        height=400,
+                    )
+                    st.session_state.post_content_html = edited_html
+
+                    # AI로 수정 요청
+                    refine_instruction = st.text_input("✏️ AI에게 수정 요청 (예: '더 친근하게 바꿔줘', '길이를 늘려줘')")
+                    if st.button("🤖 AI 수정 적용") and refine_instruction:
+                        with st.spinner("수정 중..."):
+                            try:
+                                from modules.content_generator import refine_content
+                                st.session_state.post_content_html = refine_content(edited_html, refine_instruction)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"오류: {e}")
+
+                with col2:
+                    st.markdown("**👁️ 미리보기**")
+                    st.markdown(
+                        f'<div class="post-preview">'
+                        f'<h2>{st.session_state.post_title}</h2>'
+                        f'{st.session_state.post_content_html}'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+
+                st.divider()
+                col1, col2 = st.columns(2)
+                with col1:
+                    tags_input = st.text_input("태그 (쉼표 구분)", value=", ".join(st.session_state.post_tags))
+                    st.session_state.post_tags = [t.strip() for t in tags_input.split(",") if t.strip()]
+                with col2:
+                    meta_desc = st.text_area("메타 설명 (SEO)", value=st.session_state.post_meta_desc, height=80)
+                    st.session_state.post_meta_desc = meta_desc
+
+# ════════════════════════════════════════════════════════
+# TAB 3: 미디어 (이미지 생성)
+# ════════════════════════════════════════════════════════
+with tab3:
+    st.markdown('<div class="step-header">🎨 미디어 · 이미지 생성 및 삽입</div>', unsafe_allow_html=True)
 
     if not st.session_state.post_content_html:
-        st.markdown('<div class="warn-box">⚠️ 콘텐츠 생성 탭에서 본문을 먼저 작성해주세요.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="warn-box">⚠️ "콘텐츠 작성" 탭에서 본문을 먼저 작성해주세요.</div>', unsafe_allow_html=True)
     else:
         provider = os.getenv("IMAGE_PROVIDER", "pollinations")
         st.markdown(f"**이미지 생성 방식:** `{provider.upper()}`  (설정 탭에서 변경)")
@@ -479,15 +393,12 @@ with tab4:
             current_prompt = st.session_state.image_prompts[i] if i < len(st.session_state.image_prompts) else ""
             edited = st.text_input(f"이미지 {i+1} 설명", value=current_prompt, key=f"img_prompt_{i}")
             edited_prompts.append(edited)
-        # 입력 필드 변경 감지: 버튼 클릭이 아니면 auto_proceed_tab 초기화
-        if edited_prompts != st.session_state.image_prompts:
-            st.session_state.auto_proceed_tab = None
         st.session_state.image_prompts = edited_prompts
 
         gen_img_btn = st.button("🖼️ 이미지 생성 & 본문 삽입", type="primary")
 
         if gen_img_btn:
-            prompts = st.session_state.image_prompts[:3]  # 정확히 3개만 사용
+            prompts = st.session_state.image_prompts[:3]
             with st.spinner(f"{len(prompts)}개 이미지 생성 중..."):
                 try:
                     from modules.image_generator import generate_images_for_post, insert_images_into_html
@@ -496,8 +407,6 @@ with tab4:
                         st.session_state.post_content_html,
                         st.session_state.image_urls,
                     )
-                    st.session_state.step = max(st.session_state.step, 5)
-                    st.session_state.auto_proceed_tab = None  # 자동 탭 전환 초기화
                     st.success("✅ 이미지 삽입 완료!")
                 except Exception as e:
                     st.error(f"오류: {e}")
@@ -511,32 +420,24 @@ with tab4:
                 with cols[i % 3]:
                     st.image(url, caption=f"이미지 {i+1}", use_container_width=True)
             st.divider()
-            if st.button("🚀 미리보기 & 발행으로 이동 →", type="primary", use_container_width=True):
-                st.session_state.auto_proceed_tab = 4
-                st.rerun()
 
         if not st.session_state.final_html and st.session_state.post_content_html:
-            if st.button("이미지 없이 다음 단계로 진행"):
+            if st.button("⏭️ 이미지 없이 다음 단계로 진행"):
                 st.session_state.final_html = st.session_state.post_content_html
-                st.session_state.step = max(st.session_state.step, 5)
-                st.session_state.auto_proceed_tab = 4
+                st.success("이미지 단계를 건너뛰었습니다!")
                 st.rerun()
 
 # ════════════════════════════════════════════════════════
-# TAB 5: 미리보기 & 발행
+# TAB 4: 발행 (미리보기 + 발행 + 포스팅 관리)
 # ════════════════════════════════════════════════════════
-with tab5:
-    # 다른 탭에서 설정된 auto_proceed_tab 값 제거 (현재 탭에서만 유지)
-    if st.session_state.auto_proceed_tab != 4:
-        st.session_state.auto_proceed_tab = None
-
-    st.markdown('<div class="step-header">🚀 STEP 5 · 최종 미리보기 및 Google Blogger 발행</div>', unsafe_allow_html=True)
+with tab4:
+    st.markdown('<div class="step-header">🚀 발행 및 포스팅 관리</div>', unsafe_allow_html=True)
 
     final_html = st.session_state.final_html or st.session_state.post_content_html
     title = st.session_state.post_title
 
     if not final_html:
-        st.markdown('<div class="warn-box">⚠️ 콘텐츠 생성 후 이 탭에서 발행하세요.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="warn-box">⚠️ 콘텐츠를 작성한 후 이 탭에서 발행하세요.</div>', unsafe_allow_html=True)
     else:
         col1, col2 = st.columns([2, 1])
 
@@ -556,12 +457,7 @@ with tab5:
             st.markdown("**🚀 발행 설정**")
 
             final_title = st.text_input("제목 최종 확인", value=title)
-            # 입력 필드 변경 감지: 버튼 클릭이 아니면 auto_proceed_tab 초기화
-            if final_title != title:
-                st.session_state.auto_proceed_tab = None
-
             is_draft = st.checkbox("임시저장으로 발행 (바로 공개하지 않음)", value=False)
-            st.session_state.auto_proceed_tab = None  # 체크박스 변경 시 auto_proceed_tab 초기화
 
             st.divider()
 
@@ -587,10 +483,40 @@ with tab5:
             col_draft, col_pub = st.columns(2)
             with col_draft:
                 if st.button("💾 임시저장", use_container_width=True):
-                    _publish(final_title, final_html, is_draft=True)
+                    from modules.blogger_publisher import publish_post
+                    try:
+                        with st.spinner("Blogger에 발행 중..."):
+                            result = publish_post(
+                                title=final_title,
+                                content_html=final_html,
+                                tags=st.session_state.post_tags,
+                                is_draft=True,
+                            )
+                            st.session_state.publish_result = result
+                            if not result.get("error"):
+                                st.session_state.publish_history.append(result)
+                            st.rerun()
+                    except Exception as e:
+                        st.session_state.publish_result = {"error": str(e)}
+                        st.rerun()
             with col_pub:
                 if st.button("🚀 즉시 발행", type="primary", use_container_width=True):
-                    _publish(final_title, final_html, is_draft=False)
+                    from modules.blogger_publisher import publish_post
+                    try:
+                        with st.spinner("Blogger에 발행 중..."):
+                            result = publish_post(
+                                title=final_title,
+                                content_html=final_html,
+                                tags=st.session_state.post_tags,
+                                is_draft=False,
+                            )
+                            st.session_state.publish_result = result
+                            if not result.get("error"):
+                                st.session_state.publish_history.append(result)
+                            st.rerun()
+                    except Exception as e:
+                        st.session_state.publish_result = {"error": str(e)}
+                        st.rerun()
 
         if st.session_state.publish_result:
             result = st.session_state.publish_result
@@ -605,25 +531,37 @@ with tab5:
                 </div>
                 """, unsafe_allow_html=True)
 
-        # 최근 포스팅 목록
+        # ────────────────────────────────────────────────────────────────
+        # 포스팅 관리 섹션
+        # ────────────────────────────────────────────────────────────────
         st.divider()
-        if st.button("📋 최근 포스팅 목록 조회"):
+        st.markdown("### 📋 최근 포스팅")
+
+        from modules.blogger_publisher import check_auth_status
+        auth = check_auth_status()
+
+        if st.button("🔄 포스팅 목록 새로고침"):
             if auth["ready"]:
                 try:
                     from modules.blogger_publisher import list_recent_posts
                     posts = list_recent_posts()
                     for p in posts:
                         status_icon = "🟢" if p["status"] == "LIVE" else "📝"
-                        st.markdown(f"{status_icon} [{p['title']}]({p.get('url', '#')}) · {p['published'][:10] if p['published'] else ''}")
+                        col1, col2 = st.columns([4, 1])
+                        with col1:
+                            st.markdown(f"{status_icon} [{p['title']}]({p.get('url', '#')}) · {p['published'][:10] if p['published'] else ''}")
+                        with col2:
+                            if st.button("삭제", key=f"delete_{p['id']}", use_container_width=True):
+                                st.info("(삭제 기능은 다음 버전에서 추가됩니다)")
                 except Exception as e:
                     st.error(f"조회 실패: {e}")
             else:
                 st.warning("Blogger 인증이 필요합니다.")
 
 # ════════════════════════════════════════════════════════
-# TAB 6: 설정
+# TAB 5: 설정
 # ════════════════════════════════════════════════════════
-with tab6:
+with tab5:
     st.markdown('<div class="step-header">⚙️ 설정 · API 키 및 환경 구성</div>', unsafe_allow_html=True)
 
     env_path = Path(".env")
@@ -748,21 +686,3 @@ BLOGGER_BLOG_ID={blog_id}
         - 상업적 이용 가능
         - 속도: 생성에 5-15초 소요
         """)
-
-
-# ── 발행 함수 (탭 5에서 호출) ────────────────────────────────────────────────
-def _publish(title: str, html: str, is_draft: bool):
-    from modules.blogger_publisher import publish_post
-    try:
-        with st.spinner("Blogger에 발행 중..."):
-            result = publish_post(
-                title=title,
-                content_html=html,
-                tags=st.session_state.post_tags,
-                is_draft=is_draft,
-            )
-            st.session_state.publish_result = result
-            st.rerun()
-    except Exception as e:
-        st.session_state.publish_result = {"error": str(e)}
-        st.rerun()
