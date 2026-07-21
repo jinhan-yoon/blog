@@ -41,17 +41,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           REPO_URL="https://x-access-token:$GH_TOKEN@github.com/jinhan-yoon/blog.git"
-          if [ ! -d "$DEPLOY_PATH/.git" ]; then
-            echo "저장소가 없음 → 클론"
-            mkdir -p "$DEPLOY_PATH"
-            git clone "$REPO_URL" "$DEPLOY_PATH"
+          mkdir -p "$DEPLOY_PATH"
+          cd "$DEPLOY_PATH"
+          if [ ! -d ".git" ]; then
+            echo "git 초기화 후 최신 코드 가져오기"
+            git init
+            git remote add origin "$REPO_URL"
           else
-            echo "저장소 존재 → 업데이트"
-            cd "$DEPLOY_PATH"
             git remote set-url origin "$REPO_URL"
-            git fetch origin main
-            git reset --hard origin/main
           fi
+          git fetch origin main
+          git reset --hard origin/main
 
       - name: Install / update dependencies
         run: |
