@@ -116,25 +116,27 @@ def _auto_switch_tab(tab_index: int):
     import streamlit.components.v1 as components
     components.html(
         f"""<script>
-        setTimeout(function() {{
+        function switchTab() {{
             var tabs = window.parent.document.querySelectorAll('button[role="tab"]');
-            if (tabs.length > {tab_index}) tabs[{tab_index}].click();
-        }}, 300);
+            console.log('탭 개수:', tabs.length, '목표 인덱스:', {tab_index});
+            if (tabs.length > {tab_index}) {{
+                tabs[{tab_index}].click();
+                console.log('탭 {tab_index} 클릭됨');
+            }}
+        }}
+        // 여러 번 시도
+        switchTab();
+        setTimeout(switchTab, 100);
+        setTimeout(switchTab, 300);
         </script>""",
         height=0,
     )
 
-# 다음 탭으로 이동
+# 다음 탭으로 이동 (버튼 클릭 시 자동 전환)
 if st.session_state.get("target_tab") is not None:
-    import time
-    if not hasattr(st.session_state, '_tab_switched_at'):
-        st.session_state._tab_switched_at = 0
-
-    current_time = time.time()
-    if current_time - st.session_state._tab_switched_at > 0.3:
-        _auto_switch_tab(st.session_state.target_tab)
-        st.session_state._tab_switched_at = current_time
-        st.session_state.target_tab = None
+    target = st.session_state.target_tab
+    st.session_state.target_tab = None  # 바로 초기화
+    _auto_switch_tab(target)  # 탭 전환 실행
 
 # ── 사이드바 ─────────────────────────────────────────────────────────────────
 with st.sidebar:
