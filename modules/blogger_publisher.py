@@ -1,4 +1,5 @@
 """Google Blogger API v3 연동 모듈"""
+from __future__ import annotations
 
 import os
 import json

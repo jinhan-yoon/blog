@@ -1,4 +1,5 @@
 """이미지 생성 모듈 (DALL-E 3 / Pollinations.ai / Claude+Pollinations)"""
+from __future__ import annotations
 
 import os
 import re

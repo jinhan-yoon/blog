@@ -1,4 +1,5 @@
 """vLLM (OpenAI 호환) 을 활용한 블로그 콘텐츠 생성 모듈"""
+from __future__ import annotations
 
 import os
 import json

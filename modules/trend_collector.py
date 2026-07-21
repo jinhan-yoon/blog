@@ -1,4 +1,5 @@
 """당일 트렌드 키워드 수집 모듈 - 로워드(loword.co.kr) + Google Trends RSS"""
+from __future__ import annotations
 
 import requests
 from bs4 import BeautifulSoup
