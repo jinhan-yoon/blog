@@ -98,18 +98,30 @@ def _generate_pollinations(prompt: str) -> str:
 def generate_images_for_post(image_prompts: list[str], provider: str | None = None) -> list[str]:
     """
     포스팅에 필요한 이미지 URL 목록 생성
+    최소 3개의 이미지 생성 보장
 
     Returns:
-        이미지 URL 리스트 (image_prompts와 동일 순서)
+        이미지 URL 리스트 (정확히 3개)
     """
+    # 최소 3개의 프롬프트 보장
+    prompts = (image_prompts or ["blog post illustration", "relevant image", "article image"])[:3]
+
+    # 3개 미만이면 기본값으로 채우기
+    while len(prompts) < 3:
+        prompts.append(f"Blog illustration #{len(prompts)+1}")
+
     urls = []
-    for prompt in image_prompts:
+    for i, prompt in enumerate(prompts):
         try:
             url = generate_image_url(prompt, provider)
             urls.append(url)
+            print(f"✅ 이미지 {i+1} 생성 완료: {prompt[:50]}")
         except Exception as e:
             # 실패 시 플레이스홀더 이미지 사용
-            urls.append(f"https://via.placeholder.com/1024x576?text={quote(prompt[:50])}")
+            fallback_url = f"https://via.placeholder.com/1024x576?text={quote(prompt[:50])}"
+            urls.append(fallback_url)
+            print(f"⚠️ 이미지 {i+1} 생성 실패, 플레이스홀더 사용: {str(e)}")
+
     return urls
 
 
