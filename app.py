@@ -90,6 +90,7 @@ def init_session():
         "post_meta_desc": "",
         "post_tags": [],
         "image_prompts": [],
+        "topics": None,
 
         # 미디어 관련
         "image_urls": [],
@@ -101,12 +102,39 @@ def init_session():
 
         # UI 상태
         "content_mode": "create",  # "create" 또는 "edit"
+        "target_tab": None,  # 다음 탭으로 이동할 때 사용
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
 init_session()
+
+# ── 탭 자동전환 헬퍼 ──────────────────────────────────────────────────────
+def _auto_switch_tab(tab_index: int):
+    """JavaScript로 지정한 인덱스의 탭을 클릭 (0-base)"""
+    import streamlit.components.v1 as components
+    components.html(
+        f"""<script>
+        setTimeout(function() {{
+            var tabs = window.parent.document.querySelectorAll('button[role="tab"]');
+            if (tabs.length > {tab_index}) tabs[{tab_index}].click();
+        }}, 300);
+        </script>""",
+        height=0,
+    )
+
+# 다음 탭으로 이동
+if st.session_state.get("target_tab") is not None:
+    import time
+    if not hasattr(st.session_state, '_tab_switched_at'):
+        st.session_state._tab_switched_at = 0
+
+    current_time = time.time()
+    if current_time - st.session_state._tab_switched_at > 0.3:
+        _auto_switch_tab(st.session_state.target_tab)
+        st.session_state._tab_switched_at = current_time
+        st.session_state.target_tab = None
 
 # ── 사이드바 ─────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -223,6 +251,13 @@ with tab1:
             st.markdown(f"**선택된 키워드 ({len(selected)}개):**")
             chips = " ".join([f'<span class="keyword-chip">{k}</span>' for k in selected])
             st.markdown(chips, unsafe_allow_html=True)
+
+            st.divider()
+            col1, col2 = st.columns([3, 1])
+            with col2:
+                if st.button("✍️ 콘텐츠 작성 →", type="primary", use_container_width=True):
+                    st.session_state.target_tab = 1
+                    st.rerun()
 
 # ════════════════════════════════════════════════════════
 # TAB 2: 콘텐츠 작성 (주제 선정 + 본문 생성 통합)
@@ -371,6 +406,13 @@ with tab2:
                     meta_desc = st.text_area("메타 설명 (SEO)", value=st.session_state.post_meta_desc, height=80)
                     st.session_state.post_meta_desc = meta_desc
 
+                st.divider()
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    if st.button("🎨 미디어 →", type="primary", use_container_width=True):
+                        st.session_state.target_tab = 2
+                        st.rerun()
+
 # ════════════════════════════════════════════════════════
 # TAB 3: 미디어 (이미지 생성)
 # ════════════════════════════════════════════════════════
@@ -422,10 +464,23 @@ with tab3:
             st.divider()
 
         if not st.session_state.final_html and st.session_state.post_content_html:
-            if st.button("⏭️ 이미지 없이 다음 단계로 진행"):
-                st.session_state.final_html = st.session_state.post_content_html
-                st.success("이미지 단계를 건너뛰었습니다!")
-                st.rerun()
+            st.divider()
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                if st.button("⏭️ 이미지 없이 다음 단계로 진행"):
+                    st.session_state.final_html = st.session_state.post_content_html
+                    st.success("이미지 단계를 건너뛰었습니다!")
+                    st.rerun()
+            with col2:
+                pass
+
+        if st.session_state.final_html:
+            st.divider()
+            col1, col2 = st.columns([3, 1])
+            with col2:
+                if st.button("🚀 발행 →", type="primary", use_container_width=True):
+                    st.session_state.target_tab = 3
+                    st.rerun()
 
 # ════════════════════════════════════════════════════════
 # TAB 4: 발행 (미리보기 + 발행 + 포스팅 관리)
@@ -530,6 +585,13 @@ with tab4:
                 📅 발행일: {result.get('published', '')}
                 </div>
                 """, unsafe_allow_html=True)
+
+        st.divider()
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            if st.button("⚙️ 설정 →", type="primary", use_container_width=True):
+                st.session_state.target_tab = 4
+                st.rerun()
 
         # ────────────────────────────────────────────────────────────────
         # 포스팅 관리 섹션
