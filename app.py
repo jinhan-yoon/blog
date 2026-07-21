@@ -85,6 +85,7 @@ def init_session():
         "final_html": "",
         "publish_result": None,
         "step": 1,
+        "auto_proceed_tab": None,   # 자동 이동할 탭 인덱스 (0-base)
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -130,6 +131,24 @@ with st.sidebar:
     if not llm_ok:
         st.warning("⚙️ 설정 탭에서 LLM 서버 주소를 입력해주세요.")
 
+# ── 탭 자동전환 헬퍼 ─────────────────────────────────────────────────────────
+def _auto_switch_tab(tab_index: int):
+    """JavaScript로 지정한 인덱스의 탭을 클릭 (0-base)"""
+    import streamlit.components.v1 as components
+    components.html(
+        f"""<script>
+        setTimeout(function() {{
+            var tabs = window.parent.document.querySelectorAll('button[role="tab"]');
+            if (tabs.length > {tab_index}) tabs[{tab_index}].click();
+        }}, 300);
+        </script>""",
+        height=0,
+    )
+
+if st.session_state.auto_proceed_tab is not None:
+    _auto_switch_tab(st.session_state.auto_proceed_tab)
+    st.session_state.auto_proceed_tab = None
+
 # ── 탭 구성 ──────────────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 트렌드 수집",
@@ -160,7 +179,13 @@ with tab1:
         with st.spinner("트렌드 키워드 수집 중..."):
             from modules.trend_collector import collect_all_trends
             st.session_state.trends = collect_all_trends()
-            st.success(f"✅ 수집 완료! ({st.session_state.trends['collected_at']})")
+            # 수집된 모든 키워드 자동 선택
+            st.session_state.selected_keywords = [
+                kw["keyword"] for kw in st.session_state.trends["merged"]
+            ]
+            st.session_state.step = max(st.session_state.step, 2)
+            st.session_state.auto_proceed_tab = 1   # 주제 선정 탭(index 1)으로 이동
+        st.rerun()
 
     if st.session_state.trends:
         trends = st.session_state.trends
@@ -225,9 +250,10 @@ with tab1:
                 st.markdown(f"**선택된 키워드 ({len(selected)}개):**")
                 chips = " ".join([f'<span class="keyword-chip">{k}</span>' for k in selected])
                 st.markdown(chips, unsafe_allow_html=True)
-                if st.button("→ 주제 선정으로 이동", type="primary"):
+                if st.button("🎯 주제 선정으로 이동 →", type="primary", use_container_width=True):
                     st.session_state.step = max(st.session_state.step, 2)
-                    st.info("'주제 선정' 탭으로 이동하세요.")
+                    st.session_state.auto_proceed_tab = 1
+                    st.rerun()
 
         with src_tab2:
             if trends["naver"]:
@@ -293,7 +319,8 @@ with tab2:
                             st.session_state.selected_topic = topic
                             st.session_state.post_title = topic["title"]
                             st.session_state.step = max(st.session_state.step, 3)
-                            st.success(f"✅ '{topic['title']}' 선택됨")
+                            st.session_state.auto_proceed_tab = 2   # 콘텐츠 생성 탭(index 2)으로 이동
+                            st.rerun()
                     st.divider()
 
             # 직접 입력
@@ -301,6 +328,12 @@ with tab2:
             custom_title = st.text_input("사용자 정의 제목", value=st.session_state.post_title)
             if custom_title:
                 st.session_state.post_title = custom_title
+
+            if st.session_state.post_title:
+                st.divider()
+                if st.button("✍️ 콘텐츠 생성으로 이동 →", type="primary", use_container_width=True):
+                    st.session_state.auto_proceed_tab = 2
+                    st.rerun()
 
 # ════════════════════════════════════════════════════════
 # TAB 3: 콘텐츠 생성
@@ -326,18 +359,19 @@ with tab3:
         if gen_btn:
             kws = [k.strip() for k in extra_kw.split(",") if k.strip()]
             with st.spinner("vLLM이 본문을 작성 중... (약 20-40초 소요)"):
-                    try:
-                        from modules.content_generator import generate_blog_post
-                        result = generate_blog_post(st.session_state.post_title, kws, tone)
-                        st.session_state.post_title = result.get("title", st.session_state.post_title)
-                        st.session_state.post_content_html = result.get("content_html", "")
-                        st.session_state.post_meta_desc = result.get("meta_description", "")
-                        st.session_state.post_tags = result.get("tags", [])
-                        st.session_state.image_prompts = result.get("image_prompts", [])
-                        st.session_state.step = max(st.session_state.step, 4)
-                        st.success("✅ 본문 생성 완료!")
-                    except Exception as e:
-                        st.error(f"오류: {e}")
+                try:
+                    from modules.content_generator import generate_blog_post
+                    result = generate_blog_post(st.session_state.post_title, kws, tone)
+                    st.session_state.post_title = result.get("title", st.session_state.post_title)
+                    st.session_state.post_content_html = result.get("content_html", "")
+                    st.session_state.post_meta_desc = result.get("meta_description", "")
+                    st.session_state.post_tags = result.get("tags", [])
+                    st.session_state.image_prompts = result.get("image_prompts", [])
+                    st.session_state.step = max(st.session_state.step, 4)
+                    st.session_state.auto_proceed_tab = 3   # 이미지 삽입 탭(index 3)으로 이동
+                except Exception as e:
+                    st.error(f"오류: {e}")
+            st.rerun()
 
         if st.session_state.post_content_html:
             st.divider()
@@ -382,6 +416,11 @@ with tab3:
                 meta_desc = st.text_area("메타 설명 (SEO)", value=st.session_state.post_meta_desc, height=80)
                 st.session_state.post_meta_desc = meta_desc
 
+            st.divider()
+            if st.button("🖼️ 이미지 삽입으로 이동 →", type="primary", use_container_width=True):
+                st.session_state.auto_proceed_tab = 3
+                st.rerun()
+
 # ════════════════════════════════════════════════════════
 # TAB 4: 이미지 생성
 # ════════════════════════════════════════════════════════
@@ -415,9 +454,11 @@ with tab4:
                         st.session_state.image_urls,
                     )
                     st.session_state.step = max(st.session_state.step, 5)
+                    st.session_state.auto_proceed_tab = 4   # 미리보기 탭(index 4)으로 이동
                     st.success("✅ 이미지 삽입 완료!")
                 except Exception as e:
                     st.error(f"오류: {e}")
+            st.rerun()
 
         if st.session_state.image_urls:
             st.divider()
@@ -426,11 +467,17 @@ with tab4:
             for i, url in enumerate(st.session_state.image_urls):
                 with cols[i % 3]:
                     st.image(url, caption=f"이미지 {i+1}", use_container_width=True)
+            st.divider()
+            if st.button("🚀 미리보기 & 발행으로 이동 →", type="primary", use_container_width=True):
+                st.session_state.auto_proceed_tab = 4
+                st.rerun()
 
         if not st.session_state.final_html and st.session_state.post_content_html:
             if st.button("이미지 없이 다음 단계로 진행"):
                 st.session_state.final_html = st.session_state.post_content_html
                 st.session_state.step = max(st.session_state.step, 5)
+                st.session_state.auto_proceed_tab = 4
+                st.rerun()
 
 # ════════════════════════════════════════════════════════
 # TAB 5: 미리보기 & 발행
