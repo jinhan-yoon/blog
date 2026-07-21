@@ -309,8 +309,10 @@ with tab2:
                 try:
                     from modules.content_generator import suggest_topics
                     st.session_state.topics = suggest_topics(selected_kws, topic_count)
+                    st.session_state.auto_proceed_tab = None  # 자동 탭 전환 초기화
                 except Exception as e:
                     st.error(f"오류: {e}")
+            st.rerun()  # 주제 추천 완료 후 화면 업데이트
 
         if st.session_state.topics:
             st.divider()
