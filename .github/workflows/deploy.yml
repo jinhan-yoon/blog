@@ -4,6 +4,9 @@ on:
   push:
     branches: [ "main" ]
 
+env:
+  DEPLOY_PATH: /home/jinhan2/blog
+
 jobs:
   # ── 1단계: 문법 검증 (ubuntu-latest) ─────────────────────────
   validate:
@@ -33,10 +36,15 @@ jobs:
     needs: validate
     runs-on: [self-hosted, blog]
     steps:
-      - uses: actions/checkout@v4
+      - name: Pull latest code
+        run: |
+          cd "$DEPLOY_PATH"
+          git fetch origin main
+          git reset --hard origin/main
 
       - name: Install / update dependencies
         run: |
+          cd "$DEPLOY_PATH"
           if [ ! -d venv ]; then
             python3 -m venv venv
           fi
@@ -46,19 +54,18 @@ jobs:
       - name: Register systemd service
         run: |
           SERVICE=/etc/systemd/system/blog-streamlit.service
-          # 체크아웃 경로($GITHUB_WORKSPACE)를 서비스 파일에 반영
-          sed "s|WorkingDirectory=.*|WorkingDirectory=$GITHUB_WORKSPACE|g; \
-               s|ExecStart=.*|ExecStart=$GITHUB_WORKSPACE/venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false|g; \
-               s|EnvironmentFile=.*|EnvironmentFile=$GITHUB_WORKSPACE/.env|g; \
-               /^User=/d" blog-streamlit.service \
+          sed "s|WorkingDirectory=.*|WorkingDirectory=$DEPLOY_PATH|g; \
+               s|ExecStart=.*|ExecStart=$DEPLOY_PATH/venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false|g; \
+               s|EnvironmentFile=.*|EnvironmentFile=$DEPLOY_PATH/.env|g; \
+               /^User=/d" "$DEPLOY_PATH/blog-streamlit.service" \
             | sudo tee "$SERVICE" > /dev/null
           sudo systemctl daemon-reload
           sudo systemctl enable blog-streamlit.service
 
       - name: Ensure .env exists
         run: |
-          if [ ! -f .env ]; then
-            cp .env.example .env
+          if [ ! -f "$DEPLOY_PATH/.env" ]; then
+            cp "$DEPLOY_PATH/.env.example" "$DEPLOY_PATH/.env"
             echo "⚠️ .env 가 없어 .env.example 에서 복사했습니다. 실제 값을 설정해주세요."
           fi
 
