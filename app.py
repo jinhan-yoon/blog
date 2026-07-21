@@ -63,8 +63,13 @@ st.markdown("""
     border: 1px solid #e2e8f0;
     border-radius: 12px;
     padding: 24px;
-    background: white;
+    background: #fafafa;
+    color: #1f2937;
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+.dark .post-preview {
+    background: #1e293b;
+    color: #f1f5f9;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -179,12 +184,6 @@ with tab1:
         with st.spinner("트렌드 키워드 수집 중..."):
             from modules.trend_collector import collect_all_trends
             st.session_state.trends = collect_all_trends()
-            # 수집된 모든 키워드 자동 선택
-            st.session_state.selected_keywords = [
-                kw["keyword"] for kw in st.session_state.trends["merged"]
-            ]
-            st.session_state.step = max(st.session_state.step, 2)
-            st.session_state.auto_proceed_tab = 1   # 주제 선정 탭(index 1)으로 이동
         st.rerun()
 
     if st.session_state.trends:
@@ -332,6 +331,7 @@ with tab2:
             if st.session_state.post_title:
                 st.divider()
                 if st.button("✍️ 콘텐츠 생성으로 이동 →", type="primary", use_container_width=True):
+                    st.session_state.step = max(st.session_state.step, 3)
                     st.session_state.auto_proceed_tab = 2
                     st.rerun()
 
@@ -433,18 +433,22 @@ with tab4:
         provider = os.getenv("IMAGE_PROVIDER", "pollinations")
         st.markdown(f"**이미지 생성 방식:** `{provider.upper()}`  (설정 탭에서 변경)")
 
-        if st.session_state.image_prompts:
-            st.markdown("**AI가 제안한 이미지 프롬프트 (수정 가능):**")
-            edited_prompts = []
-            for i, prompt in enumerate(st.session_state.image_prompts, 1):
-                edited = st.text_input(f"이미지 {i} 설명", value=prompt, key=f"img_prompt_{i}")
-                edited_prompts.append(edited)
-            st.session_state.image_prompts = edited_prompts
+        # 항상 3개의 이미지 프롬프트 표시
+        if not st.session_state.image_prompts:
+            st.session_state.image_prompts = ["blog post illustration", "relevant image", "article image"]
+
+        st.markdown("**AI가 제안한 이미지 프롬프트 (수정 가능):**")
+        edited_prompts = []
+        for i in range(3):
+            current_prompt = st.session_state.image_prompts[i] if i < len(st.session_state.image_prompts) else ""
+            edited = st.text_input(f"이미지 {i+1} 설명", value=current_prompt, key=f"img_prompt_{i}")
+            edited_prompts.append(edited)
+        st.session_state.image_prompts = edited_prompts
 
         gen_img_btn = st.button("🖼️ 이미지 생성 & 본문 삽입", type="primary")
 
         if gen_img_btn:
-            prompts = st.session_state.image_prompts or ["blog post illustration"]
+            prompts = st.session_state.image_prompts[:3]  # 정확히 3개만 사용
             with st.spinner(f"{len(prompts)}개 이미지 생성 중..."):
                 try:
                     from modules.image_generator import generate_images_for_post, insert_images_into_html
