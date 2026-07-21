@@ -5,7 +5,7 @@ on:
     branches: [ "main" ]
 
 jobs:
-  # ── 1단계: 문법 검증 ─────────────────────────────────────────
+  # ── 1단계: 문법 검증 (ubuntu-latest) ─────────────────────────
   validate:
     runs-on: ubuntu-latest
     steps:
@@ -28,35 +28,42 @@ jobs:
             python -m py_compile "$f" && echo "✅ $f OK"
           done
 
-  # ── 2단계: 서버 배포 ─────────────────────────────────────────
+  # ── 2단계: 배포 (self-hosted runner) ─────────────────────────
   deploy:
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, blog]
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT || 22 }}
-          script: |
-            set -e
-            DEPLOY_PATH="${{ secrets.DEPLOY_PATH }}"
+      - uses: actions/checkout@v4
 
-            echo "=== 코드 업데이트 ==="
-            cd "$DEPLOY_PATH"
-            git fetch origin main
-            git reset --hard origin/main
+      - name: Install / update dependencies
+        run: |
+          if [ ! -d venv ]; then
+            python3 -m venv venv
+          fi
+          venv/bin/pip install -q --upgrade pip
+          venv/bin/pip install -q -r requirements.txt
 
-            echo "=== 의존성 설치 ==="
-            if [ ! -d venv ]; then
-              python3 -m venv venv
-            fi
-            venv/bin/pip install -q --upgrade pip
-            venv/bin/pip install -q -r requirements.txt
+      - name: Register systemd service
+        run: |
+          SERVICE=/etc/systemd/system/blog-streamlit.service
+          # 체크아웃 경로($GITHUB_WORKSPACE)를 서비스 파일에 반영
+          sed "s|WorkingDirectory=.*|WorkingDirectory=$GITHUB_WORKSPACE|g; \
+               s|ExecStart=.*|ExecStart=$GITHUB_WORKSPACE/venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false|g; \
+               s|EnvironmentFile=.*|EnvironmentFile=$GITHUB_WORKSPACE/.env|g; \
+               /^User=/d" blog-streamlit.service \
+            | sudo tee "$SERVICE" > /dev/null
+          sudo systemctl daemon-reload
+          sudo systemctl enable blog-streamlit.service
 
-            echo "=== 서비스 재시작 ==="
-            sudo systemctl restart blog-streamlit.service
-            sleep 3
-            sudo systemctl is-active blog-streamlit.service && echo "✅ 서비스 정상 실행"
+      - name: Ensure .env exists
+        run: |
+          if [ ! -f .env ]; then
+            cp .env.example .env
+            echo "⚠️ .env 가 없어 .env.example 에서 복사했습니다. 실제 값을 설정해주세요."
+          fi
+
+      - name: Restart service
+        run: |
+          sudo systemctl restart blog-streamlit.service
+          sleep 3
+          sudo systemctl is-active blog-streamlit.service && echo "✅ blog-streamlit 서비스 정상 실행"
