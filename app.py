@@ -32,6 +32,51 @@ st.markdown("""
 /* ── 사이드바 ── */
 [data-testid="stSidebar"] { min-width: 230px; max-width: 260px; }
 
+/* ── 전체화면 로딩 모달 (st.spinner() 자동 적용) ── */
+[data-testid="stSpinner"] {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    background: rgba(15, 12, 41, 0.88) !important;
+    backdrop-filter: blur(3px) !important;
+    -webkit-backdrop-filter: blur(3px) !important;
+    z-index: 999999 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    flex-direction: column !important;
+}
+[data-testid="stSpinner"] > div {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 24px !important;
+    background: rgba(255,255,255,0.07) !important;
+    border: 1px solid rgba(167,139,250,0.3) !important;
+    border-radius: 24px !important;
+    padding: 48px 72px !important;
+    box-shadow: 0 30px 60px rgba(0,0,0,0.6) !important;
+}
+[data-testid="stSpinner"] svg {
+    width: 64px !important;
+    height: 64px !important;
+    stroke: #a78bfa !important;
+    filter: drop-shadow(0 0 12px #a78bfa) !important;
+}
+[data-testid="stSpinner"] p,
+[data-testid="stSpinner"] span,
+[data-testid="stSpinner"] div > div {
+    color: #e2e8f0 !important;
+    font-size: 1.15em !important;
+    font-weight: 500 !important;
+    text-align: center !important;
+    margin: 0 !important;
+    letter-spacing: 0.02em !important;
+}
+
 /* ── 메인 영역 ── */
 .step-header {
     background: linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%);
