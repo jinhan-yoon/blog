@@ -114,6 +114,8 @@ def init_session():
         "oauth_url":            None,
         "oauth_redirect_uri":   None,
         "oauth_code_verifier":  None,
+        "naver_oauth_url":      None,
+        "naver_oauth_state":    None,
         "manual_keywords":      [],
     }
     for k, v in defaults.items():
@@ -602,23 +604,35 @@ elif cur == "publish":
             st.markdown("**🚀 발행 설정**")
             final_title = st.text_input("제목 최종 확인", value=title)
 
+            # ── 발행 대상 선택 ─────────────────────────────────
             st.divider()
+            from modules.blogger_publisher import check_auth_status as blogger_auth_status
+            from modules.naver_publisher import check_auth_status as naver_auth_status
+            blogger_auth = blogger_auth_status()
+            naver_auth   = naver_auth_status()
 
-            from modules.blogger_publisher import check_auth_status
-            auth = check_auth_status()
+            st.markdown("**발행 대상 선택:**")
+            pub_blogger = st.checkbox(
+                f"{'✅' if blogger_auth['ready'] else '⚠️'} Google Blogger",
+                value=blogger_auth["ready"],
+                key="pub_to_blogger",
+            )
+            pub_naver = st.checkbox(
+                f"{'✅' if naver_auth['ready'] else '⚠️'} 네이버 블로그",
+                value=naver_auth["ready"],
+                key="pub_to_naver",
+            )
 
-            st.markdown("**인증 상태:**")
-            st.write(f"{'✅' if auth['client_secret'] else '❌'} client_secret.json")
-            st.write(f"{'✅' if auth.get('token_valid') else '⚠️'} OAuth 토큰")
-            st.write(f"{'✅' if auth['blog_id'] else '❌'} Blog ID")
-
-            if not auth["ready"]:
-                st.markdown('<div class="warn-box">⚠️ 설정 메뉴에서 Blogger 연동을 완료해주세요.</div>',
+            if not blogger_auth["ready"] and pub_blogger:
+                st.markdown('<div class="warn-box">⚠️ 설정 메뉴에서 Google Blogger 연동을 완료해주세요.</div>',
+                            unsafe_allow_html=True)
+            if not naver_auth["ready"] and pub_naver:
+                st.markdown('<div class="warn-box">⚠️ 설정 메뉴에서 네이버 블로그 연동을 완료해주세요.</div>',
                             unsafe_allow_html=True)
 
             st.divider()
 
-            # 로컬 저장 (Blogger 인증 없이도 가능)
+            # 로컬 저장
             if st.button("💿 로컬 저장 (data 폴더)", use_container_width=True):
                 try:
                     import json as _json
@@ -642,60 +656,85 @@ elif cur == "publish":
             st.divider()
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("💾 Blogger 임시저장", use_container_width=True):
-                    from modules.blogger_publisher import publish_post
-                    try:
-                        with st.spinner("저장 중..."):
-                            result = publish_post(
-                                title=final_title,
-                                content_html=final_html,
-                                tags=st.session_state.post_tags,
-                                is_draft=True,
-                            )
-                            st.session_state.publish_result = result
-                            if not result.get("error"):
-                                st.session_state.publish_history.append(result)
-                        st.rerun()
-                    except Exception as e:
-                        st.session_state.publish_result = {"error": str(e)}
-                        st.rerun()
+                if st.button("💾 임시저장 (Draft)", use_container_width=True):
+                    if pub_blogger and blogger_auth["ready"]:
+                        from modules.blogger_publisher import publish_post as bp_pub
+                        try:
+                            with st.spinner("Blogger 임시저장 중..."):
+                                result = bp_pub(
+                                    title=final_title,
+                                    content_html=final_html,
+                                    tags=st.session_state.post_tags,
+                                    is_draft=True,
+                                )
+                                st.session_state.publish_result = result
+                                if not result.get("error"):
+                                    st.session_state.publish_history.append(result)
+                        except Exception as e:
+                            st.session_state.publish_result = {"error": str(e)}
+                    st.rerun()
             with c2:
                 if st.button("🚀 즉시 발행", type="primary", use_container_width=True):
-                    from modules.blogger_publisher import publish_post
-                    try:
-                        with st.spinner("발행 중..."):
-                            result = publish_post(
-                                title=final_title,
-                                content_html=final_html,
-                                tags=st.session_state.post_tags,
-                                is_draft=False,
-                            )
-                            st.session_state.publish_result = result
-                            if not result.get("error"):
-                                st.session_state.publish_history.append(result)
-                        st.rerun()
-                    except Exception as e:
-                        st.session_state.publish_result = {"error": str(e)}
-                        st.rerun()
+                    results_all = {}
+                    with st.spinner("발행 중..."):
+                        if pub_blogger and blogger_auth["ready"]:
+                            from modules.blogger_publisher import publish_post as bp_pub
+                            try:
+                                r = bp_pub(
+                                    title=final_title,
+                                    content_html=final_html,
+                                    tags=st.session_state.post_tags,
+                                    is_draft=False,
+                                )
+                                results_all["blogger"] = r
+                                if not r.get("error"):
+                                    st.session_state.publish_history.append(r)
+                            except Exception as e:
+                                results_all["blogger"] = {"error": str(e)}
 
+                        if pub_naver and naver_auth["ready"]:
+                            from modules.naver_publisher import publish_post as np_pub
+                            try:
+                                r = np_pub(
+                                    title=final_title,
+                                    content_html=final_html,
+                                    tags=st.session_state.post_tags,
+                                )
+                                results_all["naver"] = r
+                            except Exception as e:
+                                results_all["naver"] = {"error": str(e)}
+
+                    st.session_state.publish_result = results_all
+                    st.rerun()
+
+        # ── 발행 결과 표시 ─────────────────────────────────
         if st.session_state.publish_result:
             result = st.session_state.publish_result
-            if result.get("error"):
-                st.error(f"❌ 발행 실패: {result['error']}")
-            else:
-                st.markdown(f"""
-                <div class="success-box">
-                ✅ <b>발행 성공!</b><br>
-                📎 URL: <a href="{result.get('url', '')}" target="_blank">{result.get('url', '')}</a><br>
-                📅 발행일: {result.get('published', '')}
-                </div>
-                """, unsafe_allow_html=True)
+
+            # 구버전 단일 결과 호환
+            if isinstance(result, dict) and "blogger" not in result and "naver" not in result:
+                result = {"blogger": result}
+
+            for platform, r in result.items():
+                platform_name = "Google Blogger" if platform == "blogger" else "네이버 블로그"
+                if r.get("error"):
+                    st.error(f"❌ {platform_name} 발행 실패: {r['error']}")
+                else:
+                    url = r.get("url", "")
+                    published = r.get("published", "")
+                    st.markdown(f"""
+                    <div class="success-box">
+                    ✅ <b>{platform_name} 발행 성공!</b><br>
+                    {"📎 URL: <a href='" + url + "' target='_blank'>" + url + "</a><br>" if url else ""}
+                    {"📅 발행일: " + published if published else ""}
+                    </div>
+                    """, unsafe_allow_html=True)
 
         st.divider()
-        st.markdown("### 📋 최근 포스팅")
+        st.markdown("### 📋 최근 Blogger 포스팅")
 
         if st.button("🔄 포스팅 목록 새로고침"):
-            if auth["ready"]:
+            if blogger_auth["ready"]:
                 try:
                     from modules.blogger_publisher import list_recent_posts
                     posts = list_recent_posts()
@@ -711,7 +750,7 @@ elif cur == "publish":
                 except Exception as e:
                     st.error(f"조회 실패: {e}")
             else:
-                st.warning("Blogger 인증이 필요합니다.")
+                st.warning("Google Blogger 인증이 필요합니다.")
 
 # ════════════════════════════════════════════════════════
 # 설정
@@ -864,6 +903,82 @@ Google Cloud Console → Credentials → 해당 OAuth 클라이언트 → Author
             else:
                 st.info("① 먼저 client_secret.json을 업로드하세요.")
 
+    # ── 네이버 블로그 설정 ────────────────────────────────
+    st.divider()
+    st.markdown("### 🟢 네이버 블로그 연동")
+    ncol1, ncol2 = st.columns(2)
+
+    with ncol1:
+        st.markdown("**① 네이버 개발자센터 앱 등록**")
+        naver_client_id     = st.text_input("Naver Client ID",     value=os.getenv("NAVER_CLIENT_ID", ""),     type="password")
+        naver_client_secret = st.text_input("Naver Client Secret", value=os.getenv("NAVER_CLIENT_SECRET", ""), type="password")
+        st.caption("네이버 개발자센터(developers.naver.com) → 애플리케이션 등록 → blog 권한 추가")
+
+    with ncol2:
+        st.markdown("**② 네이버 OAuth 인증**")
+        from modules.naver_publisher import check_auth_status as naver_auth_fn
+        _nauth = naver_auth_fn()
+        _ntoken_ok = _nauth.get("token", False) and _nauth.get("token_valid", False)
+
+        if _ntoken_ok:
+            st.success("✅ 네이버 인증 완료")
+            if st.button("🔄 네이버 토큰 재발급"):
+                Path("naver_token.json").unlink(missing_ok=True)
+                st.rerun()
+        else:
+            st.warning("⚠️ 네이버 인증 필요")
+            _naver_cid_ok = bool(os.getenv("NAVER_CLIENT_ID", "") or naver_client_id)
+
+            if _naver_cid_ok:
+                if st.button("🔗 네이버 인증 URL 생성", use_container_width=True):
+                    try:
+                        # 설정 먼저 임시 반영
+                        if naver_client_id:
+                            os.environ["NAVER_CLIENT_ID"]     = naver_client_id
+                        if naver_client_secret:
+                            os.environ["NAVER_CLIENT_SECRET"] = naver_client_secret
+                        from modules.naver_publisher import get_oauth_url as naver_oauth_url
+                        result = naver_oauth_url()
+                        st.session_state.naver_oauth_url   = result["url"]
+                        st.session_state.naver_oauth_state = result["state"]
+                    except Exception as e:
+                        st.error(f"URL 생성 실패: {e}")
+
+                if st.session_state.get("naver_oauth_url"):
+                    st.markdown("**1.** 아래 URL을 복사해 브라우저에서 열고 네이버 계정으로 승인하세요:")
+                    st.code(st.session_state.naver_oauth_url, language=None)
+                    st.markdown("""
+<div class="info-box">
+<b>2.</b> 승인 후 브라우저가 <code>http://localhost/?code=...</code>로 이동합니다.<br>
+<b>"연결할 수 없음" 오류는 정상!</b> 주소창 URL 전체를 복사해 아래에 붙여넣으세요.
+</div>
+                    """, unsafe_allow_html=True)
+                    naver_code_input = st.text_input(
+                        "리다이렉트 URL 또는 code= 값",
+                        key="naver_oauth_code",
+                        label_visibility="collapsed",
+                        placeholder="http://localhost/?code=..."
+                    )
+                    if st.button("✅ 네이버 인증 완료", type="primary", use_container_width=True) and naver_code_input:
+                        try:
+                            if naver_client_id:
+                                os.environ["NAVER_CLIENT_ID"]     = naver_client_id
+                            if naver_client_secret:
+                                os.environ["NAVER_CLIENT_SECRET"] = naver_client_secret
+                            from modules.naver_publisher import complete_oauth as naver_complete
+                            naver_complete(
+                                naver_code_input,
+                                state=st.session_state.get("naver_oauth_state", ""),
+                            )
+                            st.session_state.naver_oauth_url   = None
+                            st.session_state.naver_oauth_state = None
+                            st.success("🎉 네이버 인증 성공! naver_token.json 저장됨")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"인증 실패: {e}")
+            else:
+                st.info("Client ID와 Secret을 먼저 입력하고 저장하세요.")
+
     st.divider()
     if st.button("💾 설정 저장", type="primary"):
         env_content = f"""# ── LLM 서버 ──────────────────────────────────────────
@@ -880,6 +995,10 @@ CLAUDE_MODEL={claude_model}
 
 # ── Google Blogger ────────────────────────────────────
 BLOGGER_BLOG_ID={blog_id}
+
+# ── 네이버 블로그 ─────────────────────────────────────
+NAVER_CLIENT_ID={naver_client_id}
+NAVER_CLIENT_SECRET={naver_client_secret}
 """
         with open(".env", "w") as f:
             f.write(env_content)
@@ -894,6 +1013,18 @@ BLOGGER_BLOG_ID={blog_id}
 2. **API Keys** > **Create Key** 로 새 키 생성
 3. 위 Anthropic API Key 입력란에 붙여넣기 후 저장
 4. 이미지 생성 방식을 **claude** 로 선택하면 프롬프트를 강화하여 Pollinations.ai로 이미지 생성
+        """)
+    with st.expander("네이버 블로그 API 설정"):
+        st.markdown("""
+1. [네이버 개발자센터](https://developers.naver.com) 접속 → 로그인
+2. **Application** > **애플리케이션 등록** 클릭
+3. 애플리케이션 이름 입력 (예: 블로그자동화)
+4. **사용 API** → **블로그** 선택 (읽기/쓰기 권한)
+5. **PC 웹** 환경 → **서비스 URL**: `http://localhost`
+6. **Callback URL**: `http://localhost` 입력
+7. 등록 완료 후 **Client ID**와 **Client Secret** 복사
+8. 위 설정란에 입력 후 **💾 설정 저장** 클릭
+9. **🔗 네이버 인증 URL 생성** 으로 OAuth 인증 진행
         """)
     with st.expander("Google Blogger API 설정 (OAuth 인증 오류 해결 포함)"):
         st.markdown("""
