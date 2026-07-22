@@ -95,34 +95,45 @@ def _generate_pollinations(prompt: str) -> str:
     return url
 
 
-def generate_images_for_post(image_prompts: list[str], provider: str | None = None) -> list[str]:
+def generate_images_for_post(image_prompts: list[str], provider: str | None = None) -> list[bytes]:
     """
-    포스팅에 필요한 이미지 URL 목록 생성
-    최소 3개의 이미지 생성 보장
+    포스팅에 필요한 이미지를 생성하고 bytes로 다운로드하여 반환.
+    최소 3개 보장.
 
     Returns:
-        이미지 URL 리스트 (정확히 3개)
+        이미지 bytes 리스트 (정확히 3개, 실패 시 None 포함 가능)
     """
-    # 최소 3개의 프롬프트 보장
     prompts = (image_prompts or ["blog post illustration", "relevant image", "article image"])[:3]
-
-    # 3개 미만이면 기본값으로 채우기
     while len(prompts) < 3:
         prompts.append(f"Blog illustration #{len(prompts)+1}")
 
-    urls = []
+    results = []
     for i, prompt in enumerate(prompts):
         try:
             url = generate_image_url(prompt, provider)
-            urls.append(url)
-            print(f"✅ 이미지 {i+1} 생성 완료: {prompt[:50]}")
+            # Pollinations는 요청 시 이미지를 생성하므로 timeout을 넉넉히 설정
+            resp = requests.get(url, timeout=40, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            })
+            if resp.status_code == 200 and resp.content:
+                results.append(resp.content)
+                print(f"✅ 이미지 {i+1} 다운로드 완료 ({len(resp.content)//1024}KB): {prompt[:50]}")
+            else:
+                results.append(None)
+                print(f"⚠️ 이미지 {i+1} HTTP {resp.status_code}: {prompt[:50]}")
         except Exception as e:
-            # 실패 시 플레이스홀더 이미지 사용
-            fallback_url = f"https://via.placeholder.com/1024x576?text={quote(prompt[:50])}"
-            urls.append(fallback_url)
-            print(f"⚠️ 이미지 {i+1} 생성 실패, 플레이스홀더 사용: {str(e)}")
+            results.append(None)
+            print(f"⚠️ 이미지 {i+1} 실패: {str(e)}")
 
-    return urls
+    return results
+
+
+def get_image_urls(image_prompts: list[str], provider: str | None = None) -> list[str]:
+    """URL만 반환 (insert_images_into_html 용)"""
+    prompts = (image_prompts or ["blog post illustration", "relevant image", "article image"])[:3]
+    while len(prompts) < 3:
+        prompts.append(f"Blog illustration #{len(prompts)+1}")
+    return [generate_image_url(p, provider) for p in prompts]
 
 
 def insert_images_into_html(content_html: str, image_urls: list[str]) -> str:

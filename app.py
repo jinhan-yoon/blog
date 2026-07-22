@@ -59,6 +59,7 @@ def init_session():
         "image_prompts":      [],
         "topics":             None,
         "image_urls":         [],
+        "image_bytes":        [],
         "final_html":         "",
         "publish_result":     None,
         "publish_history":    [],
@@ -378,17 +379,20 @@ elif cur == "media":
             skip_btn = st.button("⏭️ 이미지 건너뛰기", use_container_width=True)
 
         if gen_img_btn:
-            with st.spinner(f"이미지 3개 생성 중..."):
+            with st.spinner("이미지 3개 생성 중... (Pollinations 생성에 최대 40초 소요)"):
                 try:
-                    from modules.image_generator import generate_images_for_post, insert_images_into_html
-                    st.session_state.image_urls = generate_images_for_post(
-                        st.session_state.image_prompts[:3], provider
-                    )
+                    from modules.image_generator import generate_images_for_post, get_image_urls, insert_images_into_html
+                    prompts = st.session_state.image_prompts[:3]
+                    # bytes 다운로드 (미리보기용)
+                    st.session_state.image_bytes = generate_images_for_post(prompts, provider)
+                    # URL 생성 (HTML 삽입용)
+                    urls = get_image_urls(prompts, provider)
+                    st.session_state.image_urls = urls
                     st.session_state.final_html = insert_images_into_html(
-                        st.session_state.post_content_html,
-                        st.session_state.image_urls,
+                        st.session_state.post_content_html, urls
                     )
-                    st.success("✅ 이미지 삽입 완료! 발행 단계로 이동합니다.")
+                    success_count = sum(1 for b in st.session_state.image_bytes if b)
+                    st.success(f"✅ 이미지 {success_count}/3개 생성 완료! 발행 단계로 이동합니다.")
                 except Exception as e:
                     st.error(f"오류: {e}")
             if st.session_state.final_html:
@@ -400,13 +404,16 @@ elif cur == "media":
             st.session_state.current_page = "publish"
             st.rerun()
 
-        if st.session_state.image_urls:
+        if st.session_state.get("image_bytes"):
             st.divider()
             st.markdown("**생성된 이미지 미리보기:**")
-            cols = st.columns(min(len(st.session_state.image_urls), 3))
-            for i, url in enumerate(st.session_state.image_urls):
-                with cols[i % 3]:
-                    st.image(url, caption=f"이미지 {i+1}", use_container_width=True)
+            cols = st.columns(3)
+            for i, img_data in enumerate(st.session_state.image_bytes):
+                with cols[i]:
+                    if img_data:
+                        st.image(img_data, caption=f"이미지 {i+1}", use_container_width=True)
+                    else:
+                        st.warning(f"이미지 {i+1} 생성 실패")
 
             st.divider()
             _, col2 = st.columns([3, 1])
