@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import os
 import json
-import pickle
 from pathlib import Path
 from dotenv import load_dotenv
 
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
@@ -17,6 +16,9 @@ load_dotenv()
 SCOPES = ["https://www.googleapis.com/auth/blogger"]
 TOKEN_PATH = Path("token.json")
 CLIENT_SECRET_PATH = Path("client_secret.json")
+
+# localhost OAuth 허용 (HTTP)
+os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 
 def _get_credentials() -> Credentials:
@@ -59,30 +61,17 @@ def get_client_type() -> str:
 def get_oauth_url(redirect_uri: str = "http://localhost") -> str:
     """
     서버 환경용 OAuth 인증 URL 생성.
-    - installed(Desktop app) 타입: redirect_uri = http://localhost (기본값)
-    - web 타입: redirect_uri를 Google Cloud Console에 등록된 주소로 지정해야 함
+    Flow 클래스 사용 (InstalledAppFlow의 PKCE 문제 없음).
     """
     if not CLIENT_SECRET_PATH.exists():
         raise FileNotFoundError("client_secret.json 파일이 없습니다.")
 
-    client_type = get_client_type()
-
-    if client_type == "installed":
-        flow = InstalledAppFlow.from_client_secrets_file(
-            str(CLIENT_SECRET_PATH), SCOPES
-        )
-        flow.redirect_uri = "http://localhost"
-    else:
-        # web 타입: google_auth_oauthlib.flow.Flow 사용
-        from google_auth_oauthlib.flow import Flow
-        flow = Flow.from_client_secrets_file(
-            str(CLIENT_SECRET_PATH), SCOPES, redirect_uri=redirect_uri
-        )
-
+    flow = Flow.from_client_secrets_file(
+        str(CLIENT_SECRET_PATH), SCOPES, redirect_uri=redirect_uri
+    )
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
-        include_granted_scopes="true",
     )
     return auth_url
 
@@ -94,34 +83,32 @@ def complete_oauth(code_or_url: str, redirect_uri: str = "http://localhost") -> 
     Args:
         code_or_url: 구글이 리다이렉트한 전체 URL (http://localhost/?code=xxx...)
                      또는 code= 값만 붙여넣어도 됩니다.
-        redirect_uri: OAuth URL 생성 시 사용한 redirect_uri와 동일해야 함.
+        redirect_uri: get_oauth_url() 에서 사용한 redirect_uri와 동일해야 함.
     """
     from urllib.parse import urlparse, parse_qs
 
-    # 전체 URL인 경우 code 파라미터만 추출
-    code = code_or_url.strip()
-    if code.startswith("http"):
-        params = parse_qs(urlparse(code).query)
-        code = params.get("code", [code])[0]
+    raw = code_or_url.strip()
 
-    client_type = get_client_type()
-
-    if client_type == "installed":
-        flow = InstalledAppFlow.from_client_secrets_file(
-            str(CLIENT_SECRET_PATH), SCOPES
-        )
-        flow.redirect_uri = "http://localhost"
+    if raw.startswith("http"):
+        parsed_params = parse_qs(urlparse(raw).query)
+        if "error" in parsed_params:
+            raise ValueError(f"Google 인증 오류: {parsed_params['error'][0]}")
+        code = parsed_params.get("code", [""])[0]
+        if not code:
+            raise ValueError(
+                "URL에서 인증 코드를 찾을 수 없습니다.\n"
+                "브라우저 주소창의 전체 URL을 복사해 붙여넣어 주세요."
+            )
     else:
-        from google_auth_oauthlib.flow import Flow
-        flow = Flow.from_client_secrets_file(
-            str(CLIENT_SECRET_PATH), SCOPES, redirect_uri=redirect_uri
-        )
+        code = raw
 
+    flow = Flow.from_client_secrets_file(
+        str(CLIENT_SECRET_PATH), SCOPES, redirect_uri=redirect_uri
+    )
     flow.fetch_token(code=code)
-    creds = flow.credentials
 
     with open(TOKEN_PATH, "w") as f:
-        f.write(creds.to_json())
+        f.write(flow.credentials.to_json())
 
 
 def get_blog_info(blog_id: str | None = None) -> dict:
@@ -256,7 +243,6 @@ def test_blog_connection(blog_id: str | None = None) -> dict:
         }
     except Exception as e:
         err = str(e)
-        # 친절한 오류 메시지 변환
         if "HttpError 403" in err or "forbidden" in err.lower():
             hint = "권한 없음 — 이 블로그의 소유자 계정으로 OAuth 인증했는지 확인하세요."
         elif "HttpError 404" in err or "not found" in err.lower():
