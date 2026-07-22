@@ -59,7 +59,7 @@ def init_session():
         "image_prompts":      [],
         "topics":             None,
         "image_urls":         [],
-        "image_bytes":        [],
+        "image_data":         [],
         "final_html":         "",
         "publish_result":     None,
         "publish_history":    [],
@@ -359,19 +359,43 @@ elif cur == "media":
         st.markdown('<div class="warn-box">⚠️ 먼저 콘텐츠 작성 단계를 완료해주세요.</div>',
                     unsafe_allow_html=True)
     else:
-        provider = os.getenv("IMAGE_PROVIDER", "pollinations")
-        st.markdown(f"**이미지 생성 방식:** `{provider.upper()}`  (설정에서 변경)")
+        # ── 프로바이더 선택 ──────────────────────────────────────────────────
+        _env_provider = os.getenv("IMAGE_PROVIDER", "pollinations")
+        _provider_info = {
+            "pollinations": "🆓 Pollinations.ai — API 키 불필요, AI 이미지 생성 (느릴 수 있음)",
+            "picsum":       "⚡ Lorem Picsum — API 키 불필요, 고품질 사진 즉시 로드 (랜덤 사진)",
+            "huggingface":  "🤗 HuggingFace SD XL — HF 무료 토큰 필요, AI 이미지 생성",
+            "claude":       "🤖 Claude + Pollinations — Anthropic 키 필요, 프롬프트 강화 후 생성",
+            "dalle":        "💰 DALL-E 3 — OpenAI 유료 키 필요, 최고 품질",
+        }
+        provider = st.selectbox(
+            "이미지 생성 방식 선택",
+            list(_provider_info.keys()),
+            index=list(_provider_info.keys()).index(_env_provider) if _env_provider in _provider_info else 0,
+            format_func=lambda x: _provider_info[x],
+        )
 
+        if provider == "huggingface" and not os.getenv("HUGGINGFACE_TOKEN"):
+            st.markdown('<div class="warn-box">⚠️ 설정에서 HUGGINGFACE_TOKEN을 입력해주세요. (huggingface.co에서 무료 발급)</div>', unsafe_allow_html=True)
+        if provider in ("claude",) and not os.getenv("ANTHROPIC_API_KEY"):
+            st.markdown('<div class="warn-box">⚠️ 설정에서 Anthropic API Key를 입력해주세요.</div>', unsafe_allow_html=True)
+        if provider == "dalle" and not os.getenv("OPENAI_API_KEY"):
+            st.markdown('<div class="warn-box">⚠️ 설정에서 OpenAI API Key를 입력해주세요.</div>', unsafe_allow_html=True)
+
+        st.divider()
+
+        # ── 프롬프트 편집 ────────────────────────────────────────────────────
         if not st.session_state.image_prompts:
             st.session_state.image_prompts = ["blog post illustration", "relevant image", "article image"]
 
-        st.markdown("**AI가 제안한 이미지 프롬프트 (수정 가능):**")
+        st.markdown("**이미지 프롬프트 (수정 가능, 영어 권장):**")
         edited_prompts = []
         for i in range(3):
             cur_prompt = st.session_state.image_prompts[i] if i < len(st.session_state.image_prompts) else ""
             edited_prompts.append(st.text_input(f"이미지 {i+1} 설명", value=cur_prompt, key=f"ip_{i}"))
         st.session_state.image_prompts = edited_prompts
 
+        st.divider()
         col1, col2, col3 = st.columns([2, 1, 1])
         with col2:
             gen_img_btn = st.button("🖼️ 이미지 생성 & 삽입", type="primary", use_container_width=True)
@@ -379,48 +403,63 @@ elif cur == "media":
             skip_btn = st.button("⏭️ 이미지 건너뛰기", use_container_width=True)
 
         if gen_img_btn:
-            with st.spinner("이미지 3개 생성 중... (Pollinations 생성에 최대 40초 소요)"):
+            from modules.image_generator import generate_images_for_post, insert_images_into_html
+
+            log_area = st.empty()
+            log_lines = []
+            def _log(msg):
+                log_lines.append(msg)
+                log_area.markdown("\n\n".join(log_lines))
+
+            prompts = st.session_state.image_prompts[:3]
+            with st.spinner(f"이미지 3개 생성 중... ({provider})"):
                 try:
-                    from modules.image_generator import generate_images_for_post, get_image_urls, insert_images_into_html
-                    prompts = st.session_state.image_prompts[:3]
-                    # bytes 다운로드 (미리보기용)
-                    st.session_state.image_bytes = generate_images_for_post(prompts, provider)
-                    # URL 생성 (HTML 삽입용)
-                    urls = get_image_urls(prompts, provider)
-                    st.session_state.image_urls = urls
+                    results = generate_images_for_post(prompts, provider, log_callback=_log)
+                    st.session_state.image_data = results
                     st.session_state.final_html = insert_images_into_html(
-                        st.session_state.post_content_html, urls
+                        st.session_state.post_content_html, results
                     )
-                    success_count = sum(1 for b in st.session_state.image_bytes if b)
-                    st.success(f"✅ 이미지 {success_count}/3개 생성 완료! 발행 단계로 이동합니다.")
+                    success_count = sum(1 for r in results if r.get("bytes"))
+                    if success_count > 0:
+                        st.success(f"✅ 이미지 {success_count}/3개 생성 완료!")
+                    else:
+                        st.error("❌ 이미지 생성 실패. 아래 오류를 확인하거나 다른 방식을 선택하세요.")
+                        for r in results:
+                            if r.get("error"):
+                                st.code(r["error"])
                 except Exception as e:
-                    st.error(f"오류: {e}")
-            if st.session_state.final_html:
-                st.session_state.current_page = "publish"
-                st.rerun()
+                    st.error(f"❌ 오류: {e}")
+            st.rerun()
 
         if skip_btn:
             st.session_state.final_html = st.session_state.post_content_html
+            st.session_state.image_data = []
             st.session_state.current_page = "publish"
             st.rerun()
 
-        if st.session_state.get("image_bytes"):
+        # ── 결과 미리보기 ────────────────────────────────────────────────────
+        if st.session_state.get("image_data"):
             st.divider()
             st.markdown("**생성된 이미지 미리보기:**")
             cols = st.columns(3)
-            for i, img_data in enumerate(st.session_state.image_bytes):
+            for i, item in enumerate(st.session_state.image_data):
                 with cols[i]:
-                    if img_data:
-                        st.image(img_data, caption=f"이미지 {i+1}", use_container_width=True)
+                    if item.get("bytes"):
+                        st.image(item["bytes"], caption=f"이미지 {i+1} ({item.get('provider','')})",
+                                 use_container_width=True)
                     else:
-                        st.warning(f"이미지 {i+1} 생성 실패")
+                        st.error(f"이미지 {i+1} 실패")
+                        if item.get("error"):
+                            st.caption(item["error"][:100])
 
-            st.divider()
-            _, col2 = st.columns([3, 1])
-            with col2:
-                if st.button("🚀 발행 →", type="primary", use_container_width=True):
-                    st.session_state.current_page = "publish"
-                    st.rerun()
+            success_count = sum(1 for r in st.session_state.image_data if r.get("bytes"))
+            if success_count > 0:
+                st.divider()
+                _, col2 = st.columns([3, 1])
+                with col2:
+                    if st.button("🚀 발행 →", type="primary", use_container_width=True):
+                        st.session_state.current_page = "publish"
+                        st.rerun()
 
 # ════════════════════════════════════════════════════════
 # STEP 4: 발행
@@ -562,6 +601,8 @@ elif cur == "settings":
         img_provider   = st.selectbox("이미지 생성 방식", _opts, index=_idx)
         anthropic_key  = st.text_input("Anthropic API Key (Claude용)", value=os.getenv("ANTHROPIC_API_KEY", ""), type="password")
         openai_key     = st.text_input("OpenAI API Key (DALL-E 3용)", value=os.getenv("OPENAI_API_KEY", ""), type="password")
+        hf_token       = st.text_input("HuggingFace Token (SD XL용, 무료)", value=os.getenv("HUGGINGFACE_TOKEN", ""), type="password",
+                                       help="huggingface.co 회원가입 후 Settings > Access Tokens에서 무료 발급")
 
     with col2:
         st.markdown("### 📝 Google Blogger")
@@ -598,6 +639,7 @@ LLM_API_KEY={llm_api_key}
 IMAGE_PROVIDER={img_provider}
 ANTHROPIC_API_KEY={anthropic_key}
 OPENAI_API_KEY={openai_key}
+HUGGINGFACE_TOKEN={hf_token}
 
 # ── Google Blogger ────────────────────────────────────
 BLOGGER_BLOG_ID={blog_id}
