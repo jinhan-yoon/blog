@@ -96,6 +96,7 @@ def init_session():
         "final_html":         "",
         "publish_result":     None,
         "publish_history":    [],
+        "oauth_url":          None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -546,9 +547,32 @@ elif cur == "publish":
                             unsafe_allow_html=True)
 
             st.divider()
+
+            # 로컬 저장 (Blogger 인증 없이도 가능)
+            if st.button("💿 로컬 저장 (data 폴더)", use_container_width=True):
+                try:
+                    import json as _json
+                    from datetime import datetime as _dt
+                    data_dir = Path("data")
+                    data_dir.mkdir(exist_ok=True)
+                    safe_title = "".join(c for c in final_title if c.isalnum() or c in " _-")[:40].strip()
+                    fname = data_dir / f"{_dt.now().strftime('%Y%m%d_%H%M%S')}_{safe_title}.json"
+                    payload = {
+                        "title": final_title,
+                        "content_html": final_html,
+                        "tags": st.session_state.post_tags,
+                        "meta_description": st.session_state.post_meta_desc,
+                        "saved_at": _dt.now().isoformat(),
+                    }
+                    fname.write_text(_json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                    st.success(f"✅ 로컬 저장 완료: {fname}")
+                except Exception as e:
+                    st.error(f"저장 실패: {e}")
+
+            st.divider()
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("💾 임시저장", use_container_width=True):
+                if st.button("💾 Blogger 임시저장", use_container_width=True):
                     from modules.blogger_publisher import publish_post
                     try:
                         with st.spinner("저장 중..."):
@@ -658,24 +682,58 @@ elif cur == "settings":
         blog_id = st.text_input("Blogger Blog ID", value=os.getenv("BLOGGER_BLOG_ID", ""))
 
         st.markdown("### 🔑 OAuth 2.0 인증")
-        uploaded = st.file_uploader("client_secret.json 업로드", type="json")
+
+        # Step 1: client_secret.json 업로드
+        st.markdown("**① client_secret.json 업로드**")
+        uploaded = st.file_uploader("client_secret.json 업로드", type="json", label_visibility="collapsed")
         if uploaded:
             with open("client_secret.json", "wb") as f:
                 f.write(uploaded.read())
             st.success("✅ client_secret.json 저장됨")
 
-        if Path("client_secret.json").exists():
-            st.success("✅ client_secret.json 존재")
-        else:
-            st.warning("⚠️ client_secret.json 없음")
+        secret_ok = Path("client_secret.json").exists()
+        st.write(f"{'✅' if secret_ok else '❌'} client_secret.json")
 
-        if Path("token.json").exists():
-            st.success("✅ OAuth 토큰 존재")
-            if st.button("🔄 토큰 재발급"):
+        # Step 2: OAuth 인증 URL 생성 및 코드 입력
+        st.markdown("**② Google 계정 인증**")
+        token_ok = Path("token.json").exists()
+
+        if token_ok:
+            st.success("✅ OAuth 토큰 존재 (인증 완료)")
+            if st.button("🔄 토큰 재발급 (재인증)"):
                 Path("token.json").unlink()
-                st.info("토큰 삭제됨. 다음 발행 시 재인증이 필요합니다.")
+                st.rerun()
         else:
-            st.info("ℹ️ OAuth 토큰 없음 (최초 발행 시 인증 필요)")
+            st.warning("⚠️ OAuth 토큰 없음 — 아래 절차로 인증하세요")
+
+            if secret_ok:
+                if st.button("🔗 인증 URL 생성", use_container_width=True):
+                    try:
+                        from modules.blogger_publisher import get_oauth_url
+                        url = get_oauth_url()
+                        st.session_state.oauth_url = url
+                    except Exception as e:
+                        st.error(f"URL 생성 실패: {e}")
+
+                if st.session_state.get("oauth_url"):
+                    st.markdown("**1.** 아래 URL을 복사해 브라우저에서 열고 Google 계정으로 승인하세요:")
+                    st.code(st.session_state.oauth_url, language=None)
+                    st.markdown("**2.** 승인 후 브라우저 주소창의 URL 전체를 복사해 아래에 붙여넣으세요  \n"
+                                "*(주소가 `http://localhost/?code=...` 형태)*")
+                    code_input = st.text_input("리다이렉트 URL 또는 code= 값 붙여넣기",
+                                               key="oauth_code_input", label_visibility="collapsed",
+                                               placeholder="http://localhost/?code=4/0A... 또는 코드만")
+                    if st.button("✅ 인증 완료", type="primary", use_container_width=True) and code_input:
+                        try:
+                            from modules.blogger_publisher import complete_oauth
+                            complete_oauth(code_input)
+                            st.session_state.oauth_url = None
+                            st.success("🎉 Google OAuth 인증 성공! token.json 저장됨")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"인증 실패: {e}")
+            else:
+                st.info("① 먼저 client_secret.json을 업로드하세요.")
 
     st.divider()
     if st.button("💾 설정 저장", type="primary"):

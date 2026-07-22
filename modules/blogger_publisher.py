@@ -29,22 +29,62 @@ def _get_credentials() -> Credentials:
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
+            with open(TOKEN_PATH, "w") as f:
+                f.write(creds.to_json())
         else:
-            if not CLIENT_SECRET_PATH.exists():
-                raise FileNotFoundError(
-                    "client_secret.json 파일이 없습니다. "
-                    "Google Cloud Console에서 OAuth 2.0 클라이언트 ID를 다운로드하여 "
-                    "프로젝트 루트에 저장해주세요."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(
-                str(CLIENT_SECRET_PATH), SCOPES
+            raise RuntimeError(
+                "OAuth 토큰이 없습니다. 설정 탭 > Google OAuth 인증 섹션에서 "
+                "인증을 완료해주세요."
             )
-            creds = flow.run_local_server(port=0)
-
-        with open(TOKEN_PATH, "w") as f:
-            f.write(creds.to_json())
 
     return creds
+
+
+def get_oauth_url() -> str:
+    """
+    서버 환경용 OAuth 인증 URL 생성.
+    사용자가 브라우저에서 열고 코드를 복사해 붙여넣어 인증하는 방식.
+    """
+    if not CLIENT_SECRET_PATH.exists():
+        raise FileNotFoundError("client_secret.json 파일이 없습니다.")
+
+    flow = InstalledAppFlow.from_client_secrets_file(
+        str(CLIENT_SECRET_PATH), SCOPES
+    )
+    flow.redirect_uri = "http://localhost"
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+        include_granted_scopes="true",
+    )
+    return auth_url
+
+
+def complete_oauth(code_or_url: str) -> None:
+    """
+    인증 코드 또는 리다이렉트 URL로 OAuth 완료 및 token.json 저장.
+
+    Args:
+        code_or_url: 구글이 리다이렉트한 전체 URL (http://localhost/?code=xxx...)
+                     또는 code= 값만 붙여넣어도 됩니다.
+    """
+    from urllib.parse import urlparse, parse_qs
+
+    # 전체 URL인 경우 code 파라미터만 추출
+    code = code_or_url.strip()
+    if code.startswith("http"):
+        params = parse_qs(urlparse(code).query)
+        code = params.get("code", [code])[0]
+
+    flow = InstalledAppFlow.from_client_secrets_file(
+        str(CLIENT_SECRET_PATH), SCOPES
+    )
+    flow.redirect_uri = "http://localhost"
+    flow.fetch_token(code=code)
+    creds = flow.credentials
+
+    with open(TOKEN_PATH, "w") as f:
+        f.write(creds.to_json())
 
 
 def get_blog_info(blog_id: str | None = None) -> dict:
