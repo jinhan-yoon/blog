@@ -110,8 +110,9 @@ def init_session():
         "image_data":         [],
         "final_html":         "",
         "publish_result":     None,
-        "publish_history":    [],
-        "oauth_url":          None,
+        "publish_history":      [],
+        "oauth_url":            None,
+        "oauth_redirect_uri":   None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -717,6 +718,24 @@ elif cur == "settings":
         secret_ok = Path("client_secret.json").exists()
         st.write(f"{'✅' if secret_ok else '❌'} client_secret.json")
 
+        # 클라이언트 타입 감지
+        if secret_ok:
+            from modules.blogger_publisher import get_client_type
+            _ctype = get_client_type()
+            if _ctype == "installed":
+                st.success("✅ 클라이언트 타입: Desktop app (권장)")
+            elif _ctype == "web":
+                st.warning("⚠️ 클라이언트 타입: Web application")
+                st.markdown("""
+<div class="warn-box">
+<b>Web application 타입은 추가 설정이 필요합니다:</b><br>
+Google Cloud Console → Credentials → 해당 OAuth 클라이언트 → Authorized redirect URIs에<br>
+<code>http://localhost</code> 를 추가하거나,<br>
+아래 '서버 콜백 URL' 필드에 이 서버의 실제 주소를 입력하세요.<br><br>
+<b>권장:</b> Google Cloud Console에서 새 OAuth 클라이언트를 <b>Desktop app</b> 타입으로 생성하면 이 문제 없이 사용 가능합니다.
+</div>
+                """, unsafe_allow_html=True)
+
         # Step 2: OAuth 인증 URL 생성 및 코드 입력
         st.markdown("**② Google 계정 인증**")
         token_ok = Path("token.json").exists()
@@ -730,27 +749,53 @@ elif cur == "settings":
             st.warning("⚠️ OAuth 토큰 없음 — 아래 절차로 인증하세요")
 
             if secret_ok:
+                # Web app 타입: redirect URI 입력 필드 표시
+                _ctype2 = get_client_type() if secret_ok else "installed"
+                _redirect_uri = "http://localhost"
+                if _ctype2 == "web":
+                    _redirect_uri = st.text_input(
+                        "서버 콜백 URL (Google Cloud Console Authorized redirect URIs에 등록된 주소)",
+                        value="http://localhost",
+                        help="Desktop app 타입이면 http://localhost 그대로 두세요. Web app 타입이면 실제 서버 URL 입력."
+                    )
+
                 if st.button("🔗 인증 URL 생성", use_container_width=True):
                     try:
                         from modules.blogger_publisher import get_oauth_url
-                        url = get_oauth_url()
+                        url = get_oauth_url(redirect_uri=_redirect_uri)
                         st.session_state.oauth_url = url
+                        st.session_state.oauth_redirect_uri = _redirect_uri
                     except Exception as e:
                         st.error(f"URL 생성 실패: {e}")
 
                 if st.session_state.get("oauth_url"):
                     st.markdown("**1.** 아래 URL을 복사해 브라우저에서 열고 Google 계정으로 승인하세요:")
                     st.code(st.session_state.oauth_url, language=None)
-                    st.markdown("**2.** 승인 후 브라우저 주소창의 URL 전체를 복사해 아래에 붙여넣으세요  \n"
-                                "*(주소가 `http://localhost/?code=...` 형태)*")
-                    code_input = st.text_input("리다이렉트 URL 또는 code= 값 붙여넣기",
-                                               key="oauth_code_input", label_visibility="collapsed",
-                                               placeholder="http://localhost/?code=4/0A... 또는 코드만")
+                    _ruri = st.session_state.get("oauth_redirect_uri", "http://localhost")
+                    if _ruri == "http://localhost":
+                        st.markdown("""
+<div class="info-box">
+<b>2.</b> 승인 후 브라우저가 <code>http://localhost</code> 로 이동하며 <b>'연결할 수 없음'</b> 오류가 표시됩니다.<br>
+<b>이것은 정상입니다!</b> 주소창의 전체 URL을 복사해 아래에 붙여넣으세요.<br>
+<small>(주소 예시: <code>http://localhost/?code=4/0AX4XfWh...</code>)</small>
+</div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"**2.** 승인 후 `{_ruri}` 로 리다이렉트됩니다. 주소창 전체 URL을 아래에 붙여넣으세요.")
+
+                    code_input = st.text_input(
+                        "리다이렉트 URL 또는 code= 값 붙여넣기",
+                        key="oauth_code_input",
+                        label_visibility="collapsed",
+                        placeholder="http://localhost/?code=4/0A... 또는 코드만"
+                    )
                     if st.button("✅ 인증 완료", type="primary", use_container_width=True) and code_input:
                         try:
                             from modules.blogger_publisher import complete_oauth
-                            complete_oauth(code_input)
+                            _saved_ruri = st.session_state.get("oauth_redirect_uri", "http://localhost")
+                            complete_oauth(code_input, redirect_uri=_saved_ruri)
                             st.session_state.oauth_url = None
+                            st.session_state.oauth_redirect_uri = None
                             st.success("🎉 Google OAuth 인증 성공! token.json 저장됨")
                             st.rerun()
                         except Exception as e:
@@ -789,13 +834,30 @@ BLOGGER_BLOG_ID={blog_id}
 3. 위 Anthropic API Key 입력란에 붙여넣기 후 저장
 4. 이미지 생성 방식을 **claude** 로 선택하면 프롬프트를 강화하여 Pollinations.ai로 이미지 생성
         """)
-    with st.expander("Google Blogger API 설정"):
+    with st.expander("Google Blogger API 설정 (OAuth 인증 오류 해결 포함)"):
         st.markdown("""
+**기본 설정:**
 1. [Google Cloud Console](https://console.cloud.google.com) 접속
 2. **APIs & Services > Library** > **Blogger API v3** 활성화
-3. **Credentials > Create Credentials > OAuth 2.0 Client ID** (Desktop app) 생성
-4. JSON 다운로드 후 위에서 업로드
-5. 블로그 ID: Blogger 대시보드 URL의 숫자 부분
+3. **Credentials > Create Credentials > OAuth 2.0 Client ID** 선택
+4. 애플리케이션 유형: **Desktop app** 선택 ← 중요!
+5. JSON 다운로드 후 위에서 업로드
+6. 블로그 ID: Blogger 대시보드 URL의 숫자 부분
+
+---
+**⚠️ "redirect_uri_mismatch" 오류가 나는 경우:**
+
+원인: OAuth 클라이언트가 **Web application** 타입으로 생성됨
+
+해결방법 A (권장): **Desktop app** 타입으로 새 OAuth 클라이언트 생성
+- Cloud Console → Credentials → Create Credentials → OAuth 2.0 Client ID → Desktop app
+
+해결방법 B: 기존 Web app 클라이언트의 Authorized redirect URIs에 `http://localhost` 추가
+- Cloud Console → Credentials → 해당 클라이언트 클릭 → Authorized redirect URIs → `http://localhost` 추가
+
+---
+**ℹ️ 인증 후 "연결할 수 없음" 오류가 나는 경우:**
+Desktop app 타입에서는 정상입니다. 브라우저 주소창의 URL(http://localhost/?code=...)을 복사해 붙여넣으면 됩니다.
         """)
     with st.expander("Pollinations.ai (무료 이미지)"):
         st.markdown("""

@@ -40,18 +40,45 @@ def _get_credentials() -> Credentials:
     return creds
 
 
-def get_oauth_url() -> str:
+def get_client_type() -> str:
+    """client_secret.json의 클라이언트 타입 반환: 'installed' 또는 'web'"""
+    if not CLIENT_SECRET_PATH.exists():
+        return "unknown"
+    try:
+        with open(CLIENT_SECRET_PATH) as f:
+            data = json.load(f)
+        if "installed" in data:
+            return "installed"
+        if "web" in data:
+            return "web"
+    except Exception:
+        pass
+    return "unknown"
+
+
+def get_oauth_url(redirect_uri: str = "http://localhost") -> str:
     """
     서버 환경용 OAuth 인증 URL 생성.
-    사용자가 브라우저에서 열고 코드를 복사해 붙여넣어 인증하는 방식.
+    - installed(Desktop app) 타입: redirect_uri = http://localhost (기본값)
+    - web 타입: redirect_uri를 Google Cloud Console에 등록된 주소로 지정해야 함
     """
     if not CLIENT_SECRET_PATH.exists():
         raise FileNotFoundError("client_secret.json 파일이 없습니다.")
 
-    flow = InstalledAppFlow.from_client_secrets_file(
-        str(CLIENT_SECRET_PATH), SCOPES
-    )
-    flow.redirect_uri = "http://localhost"
+    client_type = get_client_type()
+
+    if client_type == "installed":
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(CLIENT_SECRET_PATH), SCOPES
+        )
+        flow.redirect_uri = "http://localhost"
+    else:
+        # web 타입: google_auth_oauthlib.flow.Flow 사용
+        from google_auth_oauthlib.flow import Flow
+        flow = Flow.from_client_secrets_file(
+            str(CLIENT_SECRET_PATH), SCOPES, redirect_uri=redirect_uri
+        )
+
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
@@ -60,13 +87,14 @@ def get_oauth_url() -> str:
     return auth_url
 
 
-def complete_oauth(code_or_url: str) -> None:
+def complete_oauth(code_or_url: str, redirect_uri: str = "http://localhost") -> None:
     """
     인증 코드 또는 리다이렉트 URL로 OAuth 완료 및 token.json 저장.
 
     Args:
         code_or_url: 구글이 리다이렉트한 전체 URL (http://localhost/?code=xxx...)
                      또는 code= 값만 붙여넣어도 됩니다.
+        redirect_uri: OAuth URL 생성 시 사용한 redirect_uri와 동일해야 함.
     """
     from urllib.parse import urlparse, parse_qs
 
@@ -76,10 +104,19 @@ def complete_oauth(code_or_url: str) -> None:
         params = parse_qs(urlparse(code).query)
         code = params.get("code", [code])[0]
 
-    flow = InstalledAppFlow.from_client_secrets_file(
-        str(CLIENT_SECRET_PATH), SCOPES
-    )
-    flow.redirect_uri = "http://localhost"
+    client_type = get_client_type()
+
+    if client_type == "installed":
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(CLIENT_SECRET_PATH), SCOPES
+        )
+        flow.redirect_uri = "http://localhost"
+    else:
+        from google_auth_oauthlib.flow import Flow
+        flow = Flow.from_client_secrets_file(
+            str(CLIENT_SECRET_PATH), SCOPES, redirect_uri=redirect_uri
+        )
+
     flow.fetch_token(code=code)
     creds = flow.credentials
 
