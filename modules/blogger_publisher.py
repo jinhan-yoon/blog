@@ -196,3 +196,36 @@ def check_auth_status() -> dict:
             status["token_expired"] = True
 
     return status
+
+
+def test_blog_connection(blog_id: str | None = None) -> dict:
+    """
+    Blogger API 연결 및 블로그 ID 유효성 테스트.
+    Returns: {"ok": bool, "blog_name": str, "blog_url": str, "error": str}
+    """
+    blog_id = (blog_id or os.getenv("BLOGGER_BLOG_ID", "")).strip()
+    if not blog_id:
+        return {"ok": False, "error": "블로그 ID가 설정되지 않았습니다."}
+    try:
+        creds = _get_credentials()
+        service = build("blogger", "v3", credentials=creds)
+        blog = service.blogs().get(blogId=blog_id).execute()
+        return {
+            "ok": True,
+            "blog_name": blog.get("name", ""),
+            "blog_url": blog.get("url", ""),
+            "posts": blog.get("posts", {}).get("totalItems", 0),
+            "error": None,
+        }
+    except Exception as e:
+        err = str(e)
+        # 친절한 오류 메시지 변환
+        if "HttpError 403" in err or "forbidden" in err.lower():
+            hint = "권한 없음 — 이 블로그의 소유자 계정으로 OAuth 인증했는지 확인하세요."
+        elif "HttpError 404" in err or "not found" in err.lower():
+            hint = "블로그 ID를 찾을 수 없습니다 — ID가 정확한지 확인하세요."
+        elif "OAuth" in err or "token" in err.lower():
+            hint = "OAuth 토큰 오류 — 설정 탭에서 재인증해주세요."
+        else:
+            hint = err
+        return {"ok": False, "error": hint}

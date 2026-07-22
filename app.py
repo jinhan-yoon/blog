@@ -695,6 +695,14 @@ elif cur == "settings":
     with col2:
         st.markdown("### 📝 Google Blogger")
         blog_id = st.text_input("Blogger Blog ID", value=os.getenv("BLOGGER_BLOG_ID", ""))
+        if st.button("🔌 블로그 연결 테스트", use_container_width=True):
+            from modules.blogger_publisher import test_blog_connection
+            with st.spinner("블로그 연결 확인 중..."):
+                result = test_blog_connection(blog_id)
+            if result["ok"]:
+                st.success(f"✅ 연결 성공!\n블로그: {result['blog_name']}\nURL: {result['blog_url']}\n총 포스트: {result['posts']}개")
+            else:
+                st.error(f"❌ 연결 실패: {result['error']}")
 
         st.markdown("### 🔑 OAuth 2.0 인증")
 
