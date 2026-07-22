@@ -29,38 +29,8 @@ PAGE_KEYS    = [p["key"] for p in PAGES]
 # ── CSS ──────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── 사이드바 고정 크기 & 스크롤 없음 ── */
-[data-testid="stSidebar"] {
-    min-width: 220px !important;
-    max-width: 220px !important;
-    overflow: hidden !important;
-}
-[data-testid="stSidebar"] > div:first-child {
-    height: 100vh;
-    overflow: hidden !important;
-    display: flex;
-    flex-direction: column;
-    padding-top: 0.5rem !important;
-    padding-bottom: 0.5rem !important;
-}
-/* 사이드바 전체 폰트 크기 축소 */
-[data-testid="stSidebar"] * { font-size: 0.82em !important; }
-/* 사이드바 제목 */
-[data-testid="stSidebar"] h1 { font-size: 1em !important; margin: 0 0 2px 0 !important; }
-/* 사이드바 버튼 높이·여백 압축 */
-[data-testid="stSidebar"] .stButton > button {
-    padding: 4px 8px !important;
-    min-height: 0 !important;
-    height: auto !important;
-    line-height: 1.3 !important;
-    font-size: 0.82em !important;
-    margin-bottom: 2px !important;
-}
-/* 사이드바 구분선 여백 축소 */
-[data-testid="stSidebar"] hr { margin: 4px 0 !important; }
-/* 사이드바 캡션·텍스트 여백 */
-[data-testid="stSidebar"] .stMarkdown p { margin: 1px 0 !important; line-height: 1.4 !important; }
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"] { margin: 0 !important; }
+/* ── 사이드바 ── */
+[data-testid="stSidebar"] { min-width: 230px; max-width: 260px; }
 
 /* ── 메인 영역 ── */
 .step-header {
