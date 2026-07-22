@@ -160,9 +160,9 @@ def _ensure_image_placeholders(html: str) -> str:
     HTML에 이미지 플레이스홀더가 부족하면 자동으로 추가
     최소 3개의 플레이스홀더를 보장
     """
-    # 현재 플레이스홀더 개수 확인
+    # 현재 플레이스홀더 개수 확인 (단일 중괄호 {IMAGE_N} 형식)
     import re
-    placeholder_count = len(re.findall(r"\{\{IMAGE_\d+\}\}", html))
+    placeholder_count = len(re.findall(r"\{IMAGE_\d+\}", html))
 
     if placeholder_count >= 3:
         return html
@@ -174,37 +174,32 @@ def _ensure_image_placeholders(html: str) -> str:
     h2_positions = [m.end() for m in re.finditer(r"</h2>", html)]
 
     if h2_positions:
-        # 첫 번째 H2 뒤에 {{IMAGE_1}} 삽입 (없으면)
-        if "{{IMAGE_1}}" not in html and h2_positions:
-            html = html[:h2_positions[0]] + "{{IMAGE_1}}" + html[h2_positions[0]:]
+        if "{IMAGE_1}" not in html and h2_positions:
+            html = html[:h2_positions[0]] + "{IMAGE_1}" + html[h2_positions[0]:]
             needed -= 1
 
-        # 첫 번째 H2 이후의 다음 H2 뒤에 {{IMAGE_2}} 삽입
-        if "{{IMAGE_2}}" not in html and len(h2_positions) > 1 and needed > 0:
-            html = html[:h2_positions[1]] + "{{IMAGE_2}}" + html[h2_positions[1]:]
+        if "{IMAGE_2}" not in html and len(h2_positions) > 1 and needed > 0:
+            # h2_positions가 삽입으로 인해 변경되었을 수 있으므로 재검색
+            h2_positions = [m.end() for m in re.finditer(r"</h2>", html)]
+            html = html[:h2_positions[1]] + "{IMAGE_2}" + html[h2_positions[1]:]
             needed -= 1
 
-        # 마지막 H2 또는 </div> 뒤에 {{IMAGE_3}} 삽입
-        if "{{IMAGE_3}}" not in html and needed > 0:
-            # 마지막 H2 위치 또는 </div> 위치에 삽입
+        if "{IMAGE_3}" not in html and needed > 0:
+            h2_positions = [m.end() for m in re.finditer(r"</h2>", html)]
             last_h2_pos = h2_positions[-1] if h2_positions else 0
             last_div_pos = html.rfind("</div>")
             insert_pos = max(last_h2_pos, last_div_pos)
             if insert_pos > 0:
-                html = html[:insert_pos] + "{{IMAGE_3}}" + html[insert_pos:]
+                html = html[:insert_pos] + "{IMAGE_3}" + html[insert_pos:]
     else:
-        # H2가 없으면 결론 div 앞에 삽입
+        # H2가 없으면 결론 div 앞 또는 끝에 균등 삽입
         conclusion_pos = html.find('<div class="conclusion">')
-        if conclusion_pos > 0:
-            # 3개의 플레이스홀더를 균등하게 삽입
-            for i in range(1, 4):
-                if f"{{{{IMAGE_{i}}}}}" not in html:
-                    insert_point = conclusion_pos + (conclusion_pos - html.find("<p>")) * i // 4
-                    html = html[:insert_point] + f"{{{{IMAGE_{i}}}}}" + html[insert_point:]
-        else:
-            # 끝부분에 플레이스홀더 추가
-            for i in range(1, needed + 1):
-                html += f"{{{{IMAGE_{i}}}}}"
+        base_pos = conclusion_pos if conclusion_pos > 0 else len(html)
+        for i in range(1, needed + 1):
+            placeholder = f"{{IMAGE_{i}}}"
+            if placeholder not in html:
+                html = html[:base_pos] + placeholder + html[base_pos:]
+                base_pos += len(placeholder)
 
     return html
 
