@@ -114,6 +114,7 @@ def init_session():
         "oauth_url":            None,
         "oauth_redirect_uri":   None,
         "oauth_code_verifier":  None,
+        "manual_keywords":      [],
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -197,6 +198,7 @@ with st.sidebar:
 if cur == "trends":
     st.markdown('<div class="step-header">📊 STEP 1 · 트렌드 수집</div>', unsafe_allow_html=True)
 
+    # ── 자동 수집 ──────────────────────────────────────────────
     col1, col2 = st.columns([3, 1])
     with col1:
         st.markdown('<div class="info-box">Google 트렌드, 네이버에서 실시간 급상승 검색어를 자동으로 수집합니다.</div>',
@@ -210,8 +212,56 @@ if cur == "trends":
             st.session_state.trends = collect_all_trends()
         st.rerun()
 
+    # ── 수동 키워드 입력 ──────────────────────────────────────
+    st.divider()
+    st.markdown("### ✏️ 수동 키워드 입력")
+    st.markdown('<div class="info-box">트렌드 수집 없이 직접 키워드를 입력할 수 있습니다. 자동 수집과 함께 사용 가능합니다.</div>',
+                unsafe_allow_html=True)
+
+    col_inp, col_add = st.columns([4, 1])
+    with col_inp:
+        manual_input = st.text_input(
+            "키워드 입력 (쉼표로 여러 개 입력 가능)",
+            placeholder="예: 장윤정, 구속송치, 연예인 논란",
+            label_visibility="collapsed",
+            key="manual_kw_input",
+        )
+    with col_add:
+        add_btn = st.button("➕ 추가", use_container_width=True)
+
+    if add_btn and manual_input.strip():
+        new_kws = [k.strip() for k in manual_input.split(",") if k.strip()]
+        existing = st.session_state.manual_keywords
+        for kw in new_kws:
+            if kw not in existing:
+                existing.append(kw)
+        st.session_state.manual_keywords = existing
+        st.rerun()
+
+    if st.session_state.manual_keywords:
+        st.markdown("**추가된 수동 키워드:**")
+        cols_m = st.columns(6)
+        to_remove = []
+        for i, kw in enumerate(st.session_state.manual_keywords):
+            with cols_m[i % 6]:
+                if st.button(f"✕ {kw}", key=f"rm_{i}", use_container_width=True,
+                             help="클릭하면 제거됩니다"):
+                    to_remove.append(kw)
+        if to_remove:
+            st.session_state.manual_keywords = [
+                k for k in st.session_state.manual_keywords if k not in to_remove
+            ]
+            st.rerun()
+
+        if st.button("🗑️ 수동 키워드 전체 초기화", use_container_width=False):
+            st.session_state.manual_keywords = []
+            st.rerun()
+
+    # ── 자동 수집 결과 ──────────────────────────────────────
+    auto_selected = []
     if st.session_state.trends:
         trends = st.session_state.trends
+        st.divider()
         col_n, col_g = st.columns(2)
 
         with col_n:
@@ -236,10 +286,9 @@ if cur == "trends":
                 st.info("구글 데이터 없음")
 
         st.divider()
-        st.markdown("**📌 콘텐츠 작성에 사용할 키워드를 선택하세요:**")
+        st.markdown("**📌 자동 수집 키워드에서 선택하세요:**")
         merged = trends["merged"]
 
-        selected = []
         cols = st.columns(3)
         for i, kw in enumerate(merged):
             with cols[i % 3]:
@@ -247,22 +296,26 @@ if cur == "trends":
                 label = f"**{kw['keyword']}**  \n`{kw['source']}`{caret} · {kw['traffic']}"
                 if st.checkbox(label, key=f"kw_{i}",
                                value=kw["keyword"] in st.session_state.selected_keywords):
-                    selected.append(kw["keyword"])
+                    auto_selected.append(kw["keyword"])
 
-        st.session_state.selected_keywords = selected
+    # ── 최종 선택 키워드 (자동 + 수동 합산) ─────────────────
+    all_selected = auto_selected + [
+        k for k in st.session_state.manual_keywords if k not in auto_selected
+    ]
+    st.session_state.selected_keywords = all_selected
 
-        if selected:
-            st.divider()
-            st.markdown(f"**선택된 키워드 ({len(selected)}개):**")
-            chips = " ".join([f'<span class="keyword-chip">{k}</span>' for k in selected])
-            st.markdown(chips, unsafe_allow_html=True)
+    if all_selected:
+        st.divider()
+        st.markdown(f"**선택된 키워드 ({len(all_selected)}개):**")
+        chips = " ".join([f'<span class="keyword-chip">{k}</span>' for k in all_selected])
+        st.markdown(chips, unsafe_allow_html=True)
 
-            st.divider()
-            col1, col2 = st.columns([3, 1])
-            with col2:
-                if st.button("✍️ 콘텐츠 작성 →", type="primary", use_container_width=True):
-                    st.session_state.current_page = "content"
-                    st.rerun()
+        st.divider()
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            if st.button("✍️ 콘텐츠 작성 →", type="primary", use_container_width=True):
+                st.session_state.current_page = "content"
+                st.rerun()
 
 # ════════════════════════════════════════════════════════
 # STEP 2: 콘텐츠 작성
