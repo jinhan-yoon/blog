@@ -577,141 +577,278 @@ elif cur == "media":
 elif cur == "publish":
     st.markdown('<div class="step-header">🚀 STEP 4 · 발행</div>', unsafe_allow_html=True)
 
-    final_html = st.session_state.final_html or st.session_state.post_content_html
-    title = st.session_state.post_title
+    pub_tab1, pub_tab2 = st.tabs(["📝 현재 작성 글 발행", "📂 저장된 글 관리"])
 
-    if not final_html:
-        st.markdown('<div class="warn-box">⚠️ 콘텐츠를 먼저 작성해주세요.</div>',
-                    unsafe_allow_html=True)
-    else:
-        col1, col2 = st.columns([2, 1])
+    # ── TAB 1: 현재 작성 글 발행 ──────────────────────────
+    with pub_tab1:
+        final_html = st.session_state.final_html or st.session_state.post_content_html
+        title = st.session_state.post_title
 
-        with col1:
-            st.markdown("**📄 최종 포스팅 미리보기**")
-            st.markdown(
-                f'<div class="post-preview">'
-                f'<h1 style="font-size:1.6em; margin-bottom:8px;">{title}</h1>'
-                f'<p style="color:#6b7280; font-size:0.85em;">태그: {", ".join(st.session_state.post_tags)}</p>'
-                f'<hr/>'
-                f'{final_html}'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+        if not final_html:
+            st.markdown('<div class="warn-box">⚠️ 콘텐츠를 먼저 작성해주세요.</div>',
+                        unsafe_allow_html=True)
+        else:
+            col1, col2 = st.columns([2, 1])
 
-        with col2:
-            st.markdown("**🚀 발행 설정**")
-            final_title = st.text_input("제목 최종 확인", value=title)
+            with col1:
+                st.markdown("**📄 최종 포스팅 미리보기**")
+                st.markdown(
+                    f'<div class="post-preview">'
+                    f'<h1 style="font-size:1.6em; margin-bottom:8px;">{title}</h1>'
+                    f'<p style="color:#6b7280; font-size:0.85em;">태그: {", ".join(st.session_state.post_tags)}</p>'
+                    f'<hr/>'
+                    f'{final_html}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
-            st.divider()
+            with col2:
+                st.markdown("**🚀 발행 설정**")
+                final_title = st.text_input("제목 최종 확인", value=title)
 
-            from modules.blogger_publisher import check_auth_status
-            auth = check_auth_status()
+                st.divider()
 
-            st.markdown("**인증 상태:**")
-            st.write(f"{'✅' if auth['client_secret'] else '❌'} client_secret.json")
-            st.write(f"{'✅' if auth.get('token_valid') else '⚠️'} OAuth 토큰")
-            st.write(f"{'✅' if auth['blog_id'] else '❌'} Blog ID")
+                from modules.blogger_publisher import check_auth_status
+                auth = check_auth_status()
 
-            if not auth["ready"]:
-                st.markdown('<div class="warn-box">⚠️ 설정 메뉴에서 Blogger 연동을 완료해주세요.</div>',
-                            unsafe_allow_html=True)
+                st.markdown("**인증 상태:**")
+                st.write(f"{'✅' if auth['client_secret'] else '❌'} client_secret.json")
+                st.write(f"{'✅' if auth.get('token_valid') else '⚠️'} OAuth 토큰")
+                st.write(f"{'✅' if auth['blog_id'] else '❌'} Blog ID")
 
-            st.divider()
+                if not auth["ready"]:
+                    st.markdown('<div class="warn-box">⚠️ 설정 메뉴에서 Blogger 연동을 완료해주세요.</div>',
+                                unsafe_allow_html=True)
 
-            # 로컬 저장 (Blogger 인증 없이도 가능)
-            if st.button("💿 로컬 저장 (data 폴더)", use_container_width=True):
-                try:
-                    import json as _json
-                    from datetime import datetime as _dt
-                    data_dir = Path("data")
-                    data_dir.mkdir(exist_ok=True)
-                    safe_title = "".join(c for c in final_title if c.isalnum() or c in " _-")[:40].strip()
-                    fname = data_dir / f"{_dt.now().strftime('%Y%m%d_%H%M%S')}_{safe_title}.json"
-                    payload = {
-                        "title": final_title,
-                        "content_html": final_html,
-                        "tags": st.session_state.post_tags,
-                        "meta_description": st.session_state.post_meta_desc,
-                        "saved_at": _dt.now().isoformat(),
-                    }
-                    fname.write_text(_json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-                    st.success(f"✅ 로컬 저장 완료: {fname}")
-                except Exception as e:
-                    st.error(f"저장 실패: {e}")
+                st.divider()
 
-            st.divider()
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("💾 Blogger 임시저장", use_container_width=True):
-                    from modules.blogger_publisher import publish_post
+                if st.button("💿 로컬 저장 (data 폴더)", use_container_width=True):
                     try:
-                        with st.spinner("저장 중..."):
-                            result = publish_post(
-                                title=final_title,
-                                content_html=final_html,
-                                tags=st.session_state.post_tags,
-                                is_draft=True,
-                            )
-                            st.session_state.publish_result = result
-                            if not result.get("error"):
-                                st.session_state.publish_history.append(result)
-                        st.rerun()
+                        import json as _json
+                        from datetime import datetime as _dt
+                        data_dir = Path("data")
+                        data_dir.mkdir(exist_ok=True)
+                        safe_title = "".join(c for c in final_title if c.isalnum() or c in " _-")[:40].strip()
+                        fname = data_dir / f"{_dt.now().strftime('%Y%m%d_%H%M%S')}_{safe_title}.json"
+                        payload = {
+                            "title": final_title,
+                            "content_html": final_html,
+                            "tags": st.session_state.post_tags,
+                            "meta_description": st.session_state.post_meta_desc,
+                            "saved_at": _dt.now().isoformat(),
+                        }
+                        fname.write_text(_json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                        st.success(f"✅ 로컬 저장 완료: {fname.name}")
                     except Exception as e:
-                        st.session_state.publish_result = {"error": str(e)}
-                        st.rerun()
-            with c2:
-                if st.button("🚀 즉시 발행", type="primary", use_container_width=True):
-                    from modules.blogger_publisher import publish_post
+                        st.error(f"저장 실패: {e}")
+
+                st.divider()
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("💾 Blogger 임시저장", use_container_width=True):
+                        from modules.blogger_publisher import publish_post
+                        try:
+                            with st.spinner("저장 중..."):
+                                result = publish_post(
+                                    title=final_title,
+                                    content_html=final_html,
+                                    tags=st.session_state.post_tags,
+                                    is_draft=True,
+                                )
+                                st.session_state.publish_result = result
+                                if not result.get("error"):
+                                    st.session_state.publish_history.append(result)
+                            st.rerun()
+                        except Exception as e:
+                            st.session_state.publish_result = {"error": str(e)}
+                            st.rerun()
+                with c2:
+                    if st.button("🚀 즉시 발행", type="primary", use_container_width=True):
+                        from modules.blogger_publisher import publish_post
+                        try:
+                            with st.spinner("발행 중..."):
+                                result = publish_post(
+                                    title=final_title,
+                                    content_html=final_html,
+                                    tags=st.session_state.post_tags,
+                                    is_draft=False,
+                                )
+                                st.session_state.publish_result = result
+                                if not result.get("error"):
+                                    st.session_state.publish_history.append(result)
+                            st.rerun()
+                        except Exception as e:
+                            st.session_state.publish_result = {"error": str(e)}
+                            st.rerun()
+
+            if st.session_state.publish_result:
+                result = st.session_state.publish_result
+                if result.get("error"):
+                    st.error(f"❌ 발행 실패: {result['error']}")
+                else:
+                    st.markdown(f"""
+                    <div class="success-box">
+                    ✅ <b>발행 성공!</b><br>
+                    📎 URL: <a href="{result.get('url', '')}" target="_blank">{result.get('url', '')}</a><br>
+                    📅 발행일: {result.get('published', '')}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            st.divider()
+            st.markdown("### 📋 최근 Blogger 포스팅")
+
+            if st.button("🔄 포스팅 목록 새로고침"):
+                if auth["ready"]:
                     try:
-                        with st.spinner("발행 중..."):
-                            result = publish_post(
-                                title=final_title,
-                                content_html=final_html,
-                                tags=st.session_state.post_tags,
-                                is_draft=False,
-                            )
-                            st.session_state.publish_result = result
-                            if not result.get("error"):
-                                st.session_state.publish_history.append(result)
-                        st.rerun()
+                        from modules.blogger_publisher import list_recent_posts
+                        posts = list_recent_posts()
+                        for p in posts:
+                            status_icon = "🟢" if p["status"] == "LIVE" else "📝"
+                            c1, c2 = st.columns([4, 1])
+                            with c1:
+                                st.markdown(f"{status_icon} [{p['title']}]({p.get('url', '#')}) · "
+                                            f"{p['published'][:10] if p['published'] else ''}")
+                            with c2:
+                                if st.button("삭제", key=f"del_{p['id']}", use_container_width=True):
+                                    st.info("(삭제 기능은 다음 버전에서 추가됩니다)")
                     except Exception as e:
-                        st.session_state.publish_result = {"error": str(e)}
-                        st.rerun()
+                        st.error(f"조회 실패: {e}")
+                else:
+                    st.warning("Blogger 인증이 필요합니다.")
 
-        if st.session_state.publish_result:
-            result = st.session_state.publish_result
-            if result.get("error"):
-                st.error(f"❌ 발행 실패: {result['error']}")
-            else:
-                st.markdown(f"""
-                <div class="success-box">
-                ✅ <b>발행 성공!</b><br>
-                📎 URL: <a href="{result.get('url', '')}" target="_blank">{result.get('url', '')}</a><br>
-                📅 발행일: {result.get('published', '')}
-                </div>
-                """, unsafe_allow_html=True)
+    # ── TAB 2: 저장된 글 관리 ─────────────────────────────
+    with pub_tab2:
+        import json as _json
 
-        st.divider()
-        st.markdown("### 📋 최근 포스팅")
+        data_dir = Path("data")
+        data_dir.mkdir(exist_ok=True)
+        saved_files = sorted(data_dir.glob("*.json"), reverse=True)
 
-        if st.button("🔄 포스팅 목록 새로고침"):
-            if auth["ready"]:
+        if not saved_files:
+            st.markdown('<div class="info-box">저장된 글이 없습니다. 현재 작성 글 발행 탭에서 "💿 로컬 저장"을 눌러 저장하세요.</div>',
+                        unsafe_allow_html=True)
+        else:
+            st.markdown(f"**총 {len(saved_files)}개의 저장된 글**")
+            st.divider()
+
+            # 선택된 파일 편집 상태 관리
+            if "editing_file" not in st.session_state:
+                st.session_state.editing_file = None
+
+            for fpath in saved_files:
                 try:
-                    from modules.blogger_publisher import list_recent_posts
-                    posts = list_recent_posts()
-                    for p in posts:
-                        status_icon = "🟢" if p["status"] == "LIVE" else "📝"
-                        c1, c2 = st.columns([4, 1])
-                        with c1:
-                            st.markdown(f"{status_icon} [{p['title']}]({p.get('url', '#')}) · "
-                                        f"{p['published'][:10] if p['published'] else ''}")
-                        with c2:
-                            if st.button("삭제", key=f"del_{p['id']}", use_container_width=True):
-                                st.info("(삭제 기능은 다음 버전에서 추가됩니다)")
-                except Exception as e:
-                    st.error(f"조회 실패: {e}")
-            else:
-                st.warning("Blogger 인증이 필요합니다.")
+                    data = _json.loads(fpath.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+
+                saved_at = data.get("saved_at", "")[:16].replace("T", " ")
+                ftitle   = data.get("title", fpath.stem)
+                tags_str = ", ".join(data.get("tags", []))
+
+                with st.expander(f"📄 {ftitle}  |  {saved_at}", expanded=(st.session_state.editing_file == str(fpath))):
+                    if st.session_state.editing_file == str(fpath):
+                        # ── 편집 모드 ──────────────────────────
+                        st.markdown("**✏️ 편집 모드**")
+                        ed_title = st.text_input("제목", value=ftitle, key=f"ed_title_{fpath.name}")
+                        ed_tags  = st.text_input("태그 (쉼표 구분)", value=tags_str, key=f"ed_tags_{fpath.name}")
+                        ed_meta  = st.text_area("메타 설명", value=data.get("meta_description", ""),
+                                                height=60, key=f"ed_meta_{fpath.name}")
+                        ed_html  = st.text_area("본문 (HTML)", value=data.get("content_html", ""),
+                                                height=300, key=f"ed_html_{fpath.name}")
+
+                        bc1, bc2, bc3 = st.columns(3)
+                        with bc1:
+                            if st.button("💾 저장", key=f"save_{fpath.name}", use_container_width=True, type="primary"):
+                                updated = {
+                                    "title":           ed_title,
+                                    "content_html":    ed_html,
+                                    "tags":            [t.strip() for t in ed_tags.split(",") if t.strip()],
+                                    "meta_description": ed_meta,
+                                    "saved_at":        data.get("saved_at", ""),
+                                    "updated_at":      __import__("datetime").datetime.now().isoformat(),
+                                }
+                                fpath.write_text(_json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
+                                st.session_state.editing_file = None
+                                st.success("✅ 저장 완료")
+                                st.rerun()
+                        with bc2:
+                            if st.button("↩️ 취소", key=f"cancel_{fpath.name}", use_container_width=True):
+                                st.session_state.editing_file = None
+                                st.rerun()
+                        with bc3:
+                            if st.button("📥 현재 글로 불러오기", key=f"load_ed_{fpath.name}", use_container_width=True):
+                                st.session_state.post_title        = ed_title
+                                st.session_state.post_content_html = ed_html
+                                st.session_state.final_html        = ed_html
+                                st.session_state.post_tags         = [t.strip() for t in ed_tags.split(",") if t.strip()]
+                                st.session_state.post_meta_desc    = ed_meta
+                                st.session_state.editing_file      = None
+                                st.session_state.current_page      = "publish"
+                                st.success("✅ 글을 불러왔습니다. '현재 작성 글 발행' 탭에서 발행하세요.")
+                                st.rerun()
+                    else:
+                        # ── 목록 모드 ──────────────────────────
+                        st.markdown(f"**태그:** {tags_str or '없음'}")
+                        st.markdown(f"**저장일:** {saved_at}")
+
+                        mc1, mc2, mc3, mc4 = st.columns(4)
+                        with mc1:
+                            if st.button("📥 불러오기", key=f"load_{fpath.name}", use_container_width=True, type="primary"):
+                                st.session_state.post_title        = data.get("title", "")
+                                st.session_state.post_content_html = data.get("content_html", "")
+                                st.session_state.final_html        = data.get("content_html", "")
+                                st.session_state.post_tags         = data.get("tags", [])
+                                st.session_state.post_meta_desc    = data.get("meta_description", "")
+                                st.success(f"✅ '{ftitle}' 불러오기 완료! '현재 작성 글 발행' 탭에서 발행하세요.")
+                                st.rerun()
+                        with mc2:
+                            if st.button("✏️ 편집", key=f"edit_{fpath.name}", use_container_width=True):
+                                st.session_state.editing_file = str(fpath)
+                                st.rerun()
+                        with mc3:
+                            # 바로 Blogger 발행
+                            from modules.blogger_publisher import check_auth_status as _cas
+                            _auth = _cas()
+                            if _auth["ready"]:
+                                if st.button("🚀 바로 발행", key=f"pub_{fpath.name}", use_container_width=True):
+                                    from modules.blogger_publisher import publish_post as _pp
+                                    try:
+                                        with st.spinner("발행 중..."):
+                                            r = _pp(
+                                                title=data.get("title", ""),
+                                                content_html=data.get("content_html", ""),
+                                                tags=data.get("tags", []),
+                                                is_draft=False,
+                                            )
+                                        if r.get("error"):
+                                            st.error(f"❌ 발행 실패: {r['error']}")
+                                        else:
+                                            st.success(f"✅ 발행 성공! {r.get('url', '')}")
+                                    except Exception as e:
+                                        st.error(f"오류: {e}")
+                            else:
+                                st.button("🚀 바로 발행", key=f"pub_{fpath.name}",
+                                          use_container_width=True, disabled=True,
+                                          help="Blogger 인증 필요")
+                        with mc4:
+                            if st.button("🗑️ 삭제", key=f"del_{fpath.name}", use_container_width=True):
+                                st.session_state[f"confirm_del_{fpath.name}"] = True
+                                st.rerun()
+
+                        if st.session_state.get(f"confirm_del_{fpath.name}"):
+                            st.warning(f"⚠️ '{ftitle}' 을(를) 삭제하시겠습니까?")
+                            d1, d2 = st.columns(2)
+                            with d1:
+                                if st.button("✅ 확인 삭제", key=f"do_del_{fpath.name}",
+                                             use_container_width=True, type="primary"):
+                                    fpath.unlink()
+                                    del st.session_state[f"confirm_del_{fpath.name}"]
+                                    st.success("삭제 완료")
+                                    st.rerun()
+                            with d2:
+                                if st.button("취소", key=f"cancel_del_{fpath.name}", use_container_width=True):
+                                    del st.session_state[f"confirm_del_{fpath.name}"]
+                                    st.rerun()
 
 # ════════════════════════════════════════════════════════
 # 설정
