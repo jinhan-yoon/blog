@@ -113,6 +113,7 @@ def init_session():
         "publish_history":      [],
         "oauth_url":            None,
         "oauth_redirect_uri":   None,
+        "oauth_code_verifier":  None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -762,8 +763,9 @@ Google Cloud Console → Credentials → 해당 OAuth 클라이언트 → Author
                 if st.button("🔗 인증 URL 생성", use_container_width=True):
                     try:
                         from modules.blogger_publisher import get_oauth_url
-                        url = get_oauth_url(redirect_uri=_redirect_uri)
-                        st.session_state.oauth_url = url
+                        result = get_oauth_url(redirect_uri=_redirect_uri)
+                        st.session_state.oauth_url = result["url"]
+                        st.session_state.oauth_code_verifier = result["code_verifier"]
                         st.session_state.oauth_redirect_uri = _redirect_uri
                     except Exception as e:
                         st.error(f"URL 생성 실패: {e}")
@@ -793,9 +795,15 @@ Google Cloud Console → Credentials → 해당 OAuth 클라이언트 → Author
                         try:
                             from modules.blogger_publisher import complete_oauth
                             _saved_ruri = st.session_state.get("oauth_redirect_uri", "http://localhost")
-                            complete_oauth(code_input, redirect_uri=_saved_ruri)
+                            _saved_verifier = st.session_state.get("oauth_code_verifier", "")
+                            complete_oauth(
+                                code_input,
+                                redirect_uri=_saved_ruri,
+                                code_verifier=_saved_verifier,
+                            )
                             st.session_state.oauth_url = None
                             st.session_state.oauth_redirect_uri = None
+                            st.session_state.oauth_code_verifier = None
                             st.success("🎉 Google OAuth 인증 성공! token.json 저장됨")
                             st.rerun()
                         except Exception as e:

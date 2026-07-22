@@ -58,13 +58,28 @@ def get_client_type() -> str:
     return "unknown"
 
 
-def get_oauth_url(redirect_uri: str = "http://localhost") -> str:
+def get_oauth_url(redirect_uri: str = "http://localhost") -> dict:
     """
-    서버 환경용 OAuth 인증 URL 생성.
-    Flow 클래스 사용 (InstalledAppFlow의 PKCE 문제 없음).
+    서버 환경용 OAuth 인증 URL 생성 (PKCE S256 방식).
+
+    Returns:
+        {"url": str, "code_verifier": str}
+        code_verifier는 complete_oauth() 호출 시 반드시 전달해야 함.
     """
+    import hashlib
+    import base64
+    import secrets as _sec
+
     if not CLIENT_SECRET_PATH.exists():
         raise FileNotFoundError("client_secret.json 파일이 없습니다.")
+
+    # PKCE 파라미터 생성
+    code_verifier = _sec.token_urlsafe(96)
+    code_challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
+        .rstrip(b"=")
+        .decode()
+    )
 
     flow = Flow.from_client_secrets_file(
         str(CLIENT_SECRET_PATH), SCOPES, redirect_uri=redirect_uri
@@ -72,11 +87,17 @@ def get_oauth_url(redirect_uri: str = "http://localhost") -> str:
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
+        code_challenge=code_challenge,
+        code_challenge_method="S256",
     )
-    return auth_url
+    return {"url": auth_url, "code_verifier": code_verifier}
 
 
-def complete_oauth(code_or_url: str, redirect_uri: str = "http://localhost") -> None:
+def complete_oauth(
+    code_or_url: str,
+    redirect_uri: str = "http://localhost",
+    code_verifier: str = "",
+) -> None:
     """
     인증 코드 또는 리다이렉트 URL로 OAuth 완료 및 token.json 저장.
 
@@ -84,6 +105,7 @@ def complete_oauth(code_or_url: str, redirect_uri: str = "http://localhost") -> 
         code_or_url: 구글이 리다이렉트한 전체 URL (http://localhost/?code=xxx...)
                      또는 code= 값만 붙여넣어도 됩니다.
         redirect_uri: get_oauth_url() 에서 사용한 redirect_uri와 동일해야 함.
+        code_verifier: get_oauth_url() 반환값의 code_verifier 값.
     """
     from urllib.parse import urlparse, parse_qs
 
@@ -105,7 +127,12 @@ def complete_oauth(code_or_url: str, redirect_uri: str = "http://localhost") -> 
     flow = Flow.from_client_secrets_file(
         str(CLIENT_SECRET_PATH), SCOPES, redirect_uri=redirect_uri
     )
-    flow.fetch_token(code=code)
+
+    fetch_kwargs: dict = {"code": code}
+    if code_verifier:
+        fetch_kwargs["code_verifier"] = code_verifier
+
+    flow.fetch_token(**fetch_kwargs)
 
     with open(TOKEN_PATH, "w") as f:
         f.write(flow.credentials.to_json())
