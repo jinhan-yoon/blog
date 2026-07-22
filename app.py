@@ -878,64 +878,132 @@ Desktop app 타입에서는 정상입니다. 브라우저 주소창의 URL(http:
 # 매뉴얼
 # ════════════════════════════════════════════════════════
 elif cur == "manual":
-    st.markdown('<div class="step-header">📚 기술 매뉴얼 · 사용된 기술 스택</div>', unsafe_allow_html=True)
+    st.markdown('<div class="step-header">📚 매뉴얼 · 사용 가이드 및 기술 스택</div>', unsafe_allow_html=True)
 
-    st.markdown("""
-이 대시보드는 **AI 기반 블로그 자동화** 파이프라인으로,
-트렌드 수집부터 Google Blogger 발행까지 전 과정을 자동화합니다.
-    """)
-
-    st.markdown("## 🔄 전체 파이프라인")
-    st.code(
-        "트렌드 수집 → 키워드 선택 → 주제 추천 (vLLM) → 본문 생성 (vLLM) → 이미지 생성 → Blogger 발행",
-        language="text",
+    tab_guide, tab_stack, tab_trouble, tab_changelog = st.tabs(
+        ["📖 사용 가이드", "🏗️ 기술 스택", "🔧 문제 해결", "📋 변경 이력"]
     )
 
-    st.divider()
-    st.markdown("## 🏗️ 기술 스택")
+    # ── 사용 가이드 ───────────────────────────────────────────
+    with tab_guide:
+        st.markdown("## 🔄 전체 파이프라인")
+        st.code(
+            "📊 트렌드 수집 → ✍️ 콘텐츠 작성 → 🎨 미디어 → 🚀 발행",
+            language="text",
+        )
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("### 🖥️ 웹 프레임워크")
+        st.markdown("### 📊 STEP 1 · 트렌드 수집")
         st.markdown("""
+<div class="tech-card">
+1. <b>🔍 트렌드 수집 시작</b> 버튼 클릭<br>
+2. 네이버·구글 실시간 검색어 목록 확인<br>
+3. 포스팅에 사용할 키워드 체크박스로 선택<br>
+4. <b>✍️ 콘텐츠 작성 →</b> 버튼으로 다음 단계 이동
+</div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("### ✍️ STEP 2 · 콘텐츠 작성")
+        st.markdown("""
+<div class="tech-card">
+<b>2-1. 주제 선정</b><br>
+- <b>🤖 주제 추천 받기</b>: vLLM/Claude가 선택한 키워드로 블로그 주제 5개 추천<br>
+- 원하는 주제 <b>📝 선택</b> 또는 직접 제목 입력<br><br>
+<b>2-2. 본문 생성</b><br>
+- 톤 선택 (정보전달/친근한/전문적/뉴스형)<br>
+- <b>🤖 본문 생성</b>: AI가 SEO 최적화 HTML 본문 자동 작성<br>
+- 생성된 본문 직접 편집 또는 AI 수정 요청 가능<br>
+- 태그·메타 설명 확인 및 수정
+</div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("### 🎨 STEP 3 · 미디어")
+        st.markdown("""
+<div class="tech-card">
+- 이미지 생성 방식 선택 (Pollinations 권장)<br>
+- 이미지 프롬프트 3개 확인·수정 (영어 권장)<br>
+- <b>🖼️ 이미지 생성 & 삽입</b>: 이미지 3개 자동 생성 후 본문에 삽입<br>
+- 실패 시 자동으로 Picsum 사진으로 대체
+</div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("### 🚀 STEP 4 · 발행")
+        st.markdown("""
+<div class="tech-card">
+- <b>💿 로컬 저장</b>: OAuth 없이 data/ 폴더에 JSON 저장<br>
+- <b>💾 Blogger 임시저장</b>: 블로그에 Draft로 저장 (OAuth 필요)<br>
+- <b>🚀 즉시 발행</b>: 블로그에 즉시 발행 (OAuth 필요)<br><br>
+<b>발행 전 필수:</b> 설정 탭에서 Google OAuth 인증 완료
+</div>
+        """, unsafe_allow_html=True)
+
+        st.divider()
+        st.markdown("## 🔑 Google OAuth 인증 방법")
+        st.markdown("""
+<div class="tech-card">
+<b>① Google Cloud Console 설정</b><br>
+1. <a href="https://console.cloud.google.com">console.cloud.google.com</a> 접속<br>
+2. APIs & Services → Library → <b>Blogger API v3</b> 활성화<br>
+3. Credentials → Create Credentials → <b>OAuth 2.0 Client ID</b><br>
+4. 애플리케이션 유형: <b>Desktop app</b> ← 반드시 Desktop app!<br>
+5. JSON 다운로드<br><br>
+
+<b>② 앱에서 인증</b><br>
+1. 설정 탭 → client_secret.json 업로드<br>
+2. 🔗 인증 URL 생성 클릭<br>
+3. URL 복사 → 브라우저에서 열기 → Google 계정 승인<br>
+4. 브라우저가 <code>http://localhost/?code=...</code>로 이동<br>
+   → <b>"연결할 수 없음" 오류는 정상!</b> 주소창 URL을 복사하면 됩니다<br>
+5. 복사한 URL을 입력창에 붙여넣기 → ✅ 인증 완료 클릭
+</div>
+        """, unsafe_allow_html=True)
+
+    # ── 기술 스택 ──────────────────────────────────────────────
+    with tab_stack:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("### 🖥️ 웹 프레임워크")
+            st.markdown("""
 <div class="tech-card">
 <b>Streamlit</b> <span class="tech-badge">v1.35+</span><br>
 Python으로 데이터 앱을 빠르게 만드는 오픈소스 프레임워크.<br>
 <code>st.session_state</code>로 단계별 데이터를 유지하며,<br>
 사이드바·컬럼·버튼 등 내장 컴포넌트를 활용합니다.
 </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-        st.markdown("### 🤖 AI / LLM")
-        st.markdown("""
+            st.markdown("### 🤖 AI / LLM")
+            st.markdown("""
 <div class="tech-card">
 <b>vLLM</b> <span class="tech-badge">자체 호스팅</span> <span class="tech-badge">OpenAI 호환</span><br>
 LLM을 고속 서빙하는 오픈소스 추론 엔진.<br>
 OpenAI API 형식과 호환되어 <code>openai</code> SDK로 통신합니다.<br><br>
 <b>Google Gemma 4 (31B-it)</b> <span class="tech-badge">LLM 모델</span><br>
 주제 추천·본문 생성·수정 요청에 사용되는 한국어 지원 LLM 모델.<br><br>
-<b>OpenAI SDK</b> <span class="tech-badge">v1.30+</span><br>
-vLLM 서버 통신 클라이언트. <code>base_url</code>을 vLLM 주소로 교체하여 사용.
+<b>Anthropic Claude API</b> <span class="tech-badge">Fallback</span><br>
+vLLM 불가 시 자동으로 Claude로 전환. <code>claude-sonnet-4-6</code> 기본값.
 </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-        st.markdown("### 🖼️ 이미지 생성")
-        st.markdown("""
+            st.markdown("### 🖼️ 이미지 생성 (5가지 프로바이더)")
+            st.markdown("""
 <div class="tech-card">
 <b>Pollinations.ai</b> <span class="tech-badge">무료 · 기본값</span><br>
 API 키 없이 URL 파라미터로 이미지를 생성하는 무료 서비스.<br><br>
-<b>Anthropic Claude API</b> <span class="tech-badge">선택</span><br>
-이미지 프롬프트를 영어로 강화(Prompt Enhancement)한 후<br>
-Pollinations.ai로 렌더링하는 하이브리드 방식.<br><br>
-<b>OpenAI DALL-E 3</b> <span class="tech-badge">유료 · 선택</span><br>
-OpenAI API를 통해 고품질 이미지 생성. API 키 필요.
+<b>Lorem Picsum</b> <span class="tech-badge">무료 · 항상 성공</span><br>
+고품질 랜덤 실사 사진. 속도 빠름. Pollinations 실패 시 자동 fallback.<br><br>
+<b>HuggingFace SD XL</b> <span class="tech-badge">무료 토큰</span><br>
+Stable Diffusion XL AI 이미지 생성.<br><br>
+<b>Claude + Pollinations</b> <span class="tech-badge">선택</span><br>
+Claude가 프롬프트를 영어로 강화 후 Pollinations으로 렌더링.<br><br>
+<b>OpenAI DALL-E 3</b> <span class="tech-badge">유료</span><br>
+최고 품질 AI 이미지. OpenAI API 키 필요.
 </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-    with col2:
-        st.markdown("### 📊 트렌드 수집")
-        st.markdown("""
+        with col2:
+            st.markdown("### 📊 트렌드 수집")
+            st.markdown("""
 <div class="tech-card">
 <b>Loword API</b> (loword.co.kr) <span class="tech-badge">서드파티</span><br>
 네이버 + 구글 실시간 검색어를 날짜 기반으로 제공하는 API.<br>
@@ -946,78 +1014,156 @@ OpenAI API를 통해 고품질 이미지 생성. API 키 필요.
 <b>BeautifulSoup4 + lxml</b> <span class="tech-badge">v4.12+</span><br>
 RSS XML 및 HTML 콘텐츠 파싱 라이브러리.
 </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-        st.markdown("### 📝 발행 (Google Blogger)")
-        st.markdown("""
+            st.markdown("### 📝 발행 (Google Blogger)")
+            st.markdown("""
 <div class="tech-card">
 <b>Google Blogger API v3</b><br>
 Blogger 블로그에 포스팅을 생성·조회하는 REST API.<br>
 Google Cloud Console에서 활성화 후 사용.<br><br>
 <b>google-api-python-client</b> <span class="tech-badge">v2.120+</span><br>
 Google API 공식 Python 클라이언트 라이브러리.<br><br>
-<b>google-auth-oauthlib</b> <span class="tech-badge">v1.2+</span><br>
-OAuth 2.0 인증 흐름 처리.<br>
+<b>google-auth-oauthlib · Flow</b> <span class="tech-badge">v1.2+</span><br>
+OAuth 2.0 PKCE S256 방식 인증.<br>
 <code>client_secret.json</code> + <code>token.json</code>으로 토큰을 발급·갱신합니다.
 </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-        st.markdown("### 🛠️ 유틸리티")
-        st.markdown("""
+            st.markdown("### 📝 AI 감지 회피")
+            st.markdown("""
+<div class="tech-card">
+<b>구글 AdSense AI 감지 회피 전략</b> <span class="tech-badge">프롬프트 최적화</span><br>
+- 문장 길이 불규칙 (짧은 ↔ 긴 문장 혼재)<br>
+- 구체적 숫자·날짜·경험담 삽입<br>
+- 구어체·감탄사·수사적 질문 활용<br>
+- AI 전형 표현 회피 ("알아보겠습니다" → "얘기해볼게요")<br>
+- E-E-A-T (경험·전문성·권위성·신뢰성) 반영<br>
+- 태그 8~10개 (핵심 키워드 + 연관 검색어)
+</div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("### 🛠️ 유틸리티")
+            st.markdown("""
 <div class="tech-card">
 <b>python-dotenv</b> <span class="tech-badge">v1.0+</span><br>
 <code>.env</code> 파일에서 환경 변수를 로드. API 키·서버 주소 등 관리.<br><br>
-<b>Pillow</b> <span class="tech-badge">v10+</span><br>
-이미지 처리 라이브러리. 생성된 이미지 검증·처리에 활용.<br><br>
 <b>requests</b> <span class="tech-badge">v2.31+</span><br>
-HTTP 요청 라이브러리. 트렌드 API 호출 및 이미지 URL 요청에 사용.
+HTTP 요청. 트렌드 API 호출 및 이미지 다운로드에 사용.
 </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-    st.divider()
-    st.markdown("## 📁 프로젝트 구조")
-    st.code("""
+        st.divider()
+        st.markdown("## 📁 프로젝트 구조")
+        st.code("""
 blog/
-├── app.py                    # 메인 Streamlit 앱
+├── app.py                    # 메인 Streamlit 앱 (사이드바 네비게이션)
 ├── requirements.txt          # Python 패키지 목록
 ├── .env                      # 환경 변수 (API 키 등, git 제외)
-├── .env.example              # 환경 변수 예시
-├── run.sh                    # 앱 실행 스크립트
-├── blog-streamlit.service    # systemd 서비스 설정 (Linux)
+├── client_secret.json        # Google OAuth 비밀키 (git 제외)
+├── token.json                # OAuth 토큰 (자동 생성, git 제외)
+├── data/                     # 로컬 저장 포스팅 (JSON)
 └── modules/
     ├── trend_collector.py    # 트렌드 수집 (Loword + Google RSS)
-    ├── content_generator.py  # LLM 콘텐츠 생성 (vLLM)
-    ├── image_generator.py    # 이미지 생성 (Pollinations/Claude/DALL-E)
-    └── blogger_publisher.py  # Blogger API 발행
-    """, language="text")
+    ├── content_generator.py  # LLM 생성 (vLLM → Claude fallback)
+    ├── image_generator.py    # 이미지 생성 (5가지 프로바이더)
+    └── blogger_publisher.py  # Blogger 발행 (PKCE OAuth)
+        """, language="text")
 
-    st.divider()
-    st.markdown("## ⚙️ 환경 변수")
-    st.markdown("""
+        st.markdown("## ⚙️ 환경 변수")
+        st.markdown("""
 | 변수명 | 설명 | 예시 |
 |--------|------|------|
 | `LLM_ADDR` | vLLM 서버 주소 | `http://192.168.1.1:8000` |
 | `LLM_MODEL` | LLM 모델명 | `google/gemma-4-31b-it` |
-| `LLM_API_KEY` | vLLM API 키 (보통 EMPTY) | `EMPTY` |
-| `IMAGE_PROVIDER` | 이미지 생성 방식 | `pollinations` / `claude` / `dalle` |
-| `ANTHROPIC_API_KEY` | Claude API 키 | `sk-ant-...` |
-| `OPENAI_API_KEY` | OpenAI API 키 | `sk-...` |
+| `ANTHROPIC_API_KEY` | Claude API 키 (fallback) | `sk-ant-...` |
+| `CLAUDE_MODEL` | Claude 모델 | `claude-sonnet-4-6` |
+| `IMAGE_PROVIDER` | 이미지 생성 방식 | `pollinations` |
+| `HUGGINGFACE_TOKEN` | HF 토큰 (선택) | `hf_...` |
+| `OPENAI_API_KEY` | OpenAI 키 (DALL-E용) | `sk-...` |
 | `BLOGGER_BLOG_ID` | Blogger 블로그 ID | `1234567890` |
-    """)
+        """)
 
-    st.divider()
-    st.markdown("## 🚀 실행 방법")
-    st.code("""
-# 1. 패키지 설치
-pip install -r requirements.txt
+    # ── 문제 해결 ──────────────────────────────────────────────
+    with tab_trouble:
+        st.markdown("## 🔧 자주 발생하는 문제")
 
-# 2. 환경 변수 설정
-cp .env.example .env
-# .env 파일을 편집하여 API 키 입력
+        with st.expander("OAuth 오류: redirect_uri_mismatch", expanded=False):
+            st.markdown("""
+**원인**: OAuth 클라이언트가 Web application 타입으로 생성됨
 
-# 3. 앱 실행
-streamlit run app.py --server.port 8501
+**해결**:
+- Google Cloud Console → Credentials → 새 OAuth 2.0 Client ID 생성
+- 애플리케이션 유형: **Desktop app** 선택
+- 기존 client_secret.json을 새것으로 교체 후 재인증
+            """)
 
-# 또는 run.sh 사용
-bash run.sh
-    """, language="bash")
+        with st.expander("OAuth 오류: invalid_grant / Missing code verifier", expanded=False):
+            st.markdown("""
+**원인**: 이전에 생성한 인증 URL을 재사용하거나, 코드가 만료됨
+
+**해결**:
+1. 설정 탭 → 🔄 토큰 재발급 클릭
+2. 🔗 인증 URL 생성을 다시 클릭해 새 URL 생성
+3. 새 URL로 다시 인증 진행
+            """)
+
+        with st.expander("이미지 생성 실패 (Pollinations 오류)", expanded=False):
+            st.markdown("""
+**원인**: Pollinations.ai 서버 응답 지연 또는 타임아웃
+
+**해결**:
+- 미디어 탭에서 이미지 생성 방식을 **Picsum** 으로 변경 후 재시도
+- Pollinations는 자동으로 Picsum으로 fallback되므로 결과는 표시됨
+- 잠시 후 다시 Pollinations 시도
+            """)
+
+        with st.expander("블로그 발행 실패 (HttpError 403)", expanded=False):
+            st.markdown("""
+**원인**: OAuth 인증한 Google 계정이 해당 블로그의 소유자·관리자가 아님
+
+**해결**:
+1. 설정 탭 → 🔄 토큰 재발급
+2. 블로그를 소유한 Google 계정으로 재인증
+3. 블로그 연결 테스트로 확인
+            """)
+
+        with st.expander("블로그 발행 실패 (HttpError 404)", expanded=False):
+            st.markdown("""
+**원인**: 블로그 ID가 잘못됨
+
+**해결**:
+1. Blogger 관리 페이지 (blogger.com) 접속
+2. 해당 블로그 선택 → 주소창 URL에서 숫자 ID 확인
+   예: `www.blogger.com/blog/posts/1234567890123456789` → ID: `1234567890123456789`
+3. 설정 탭 → Blog ID 수정 후 저장
+            """)
+
+        with st.expander("vLLM 연결 안 됨", expanded=False):
+            st.markdown("""
+**증상**: 사이드바에 ❌ vLLM 표시
+
+**해결**:
+- 설정 탭에서 LLM 서버 주소 확인
+- vLLM 서버가 실행 중인지 확인
+- vLLM 불가 시 Claude로 자동 전환됨 (ANTHROPIC_API_KEY 필요)
+            """)
+
+    # ── 변경 이력 ──────────────────────────────────────────────
+    with tab_changelog:
+        st.markdown("## 📋 변경 이력")
+        st.markdown("""
+| 날짜 | 변경 내용 |
+|------|-----------|
+| 2026-07-22 | AI 감지 회피 프롬프트 강화, 태그 8~10개로 확대 |
+| 2026-07-22 | OAuth PKCE S256 직접 구현 (invalid_grant 오류 완전 해결) |
+| 2026-07-22 | OAuth Flow 클래스로 교체 (InstalledAppFlow PKCE 충돌 제거) |
+| 2026-07-22 | OAuth 클라이언트 타입 감지 (Desktop app / Web app) 및 안내 |
+| 2026-07-22 | 블로그 연결 테스트 기능 추가 (설정 탭) |
+| 2026-07-22 | 로컬 data 폴더 저장 기능 추가 (OAuth 없이도 저장 가능) |
+| 2026-07-22 | 전체화면 로딩 모달 (CSS st.spinner 오버레이) |
+| 2026-07-22 | vLLM → Claude 자동 fallback, 사이드바 실시간 LLM 상태 표시 |
+| 2026-07-22 | 이미지 다중 프로바이더 + 자동 fallback (5가지) |
+| 2026-07-22 | 사이드바 네비게이션 UI 전면 개편 (탭 → 사이드바) |
+| 2026-07-22 | 매뉴얼 페이지 추가 |
+        """)
