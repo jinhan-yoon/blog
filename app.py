@@ -121,18 +121,32 @@ with st.sidebar:
 
     st.divider()
 
-    # API 상태
-    llm_ok    = bool(os.getenv("LLM_ADDR", ""))
+    # LLM / API 상태
+    from modules.content_generator import check_llm_status
+    llm_status = check_llm_status()
     blogger_ok = bool(os.getenv("BLOGGER_BLOG_ID", ""))
-    img_prov  = os.getenv("IMAGE_PROVIDER", "pollinations")
+    img_prov   = os.getenv("IMAGE_PROVIDER", "pollinations")
 
-    st.caption("**API 연결 상태**")
-    st.write(f"{'✅' if llm_ok else '❌'} vLLM ({os.getenv('LLM_ADDR', '미설정')})")
+    st.caption("**LLM 상태**")
+    if llm_status["vllm_available"]:
+        st.write("✅ vLLM 연결됨")
+    else:
+        st.write(f"❌ vLLM 불가 ({os.getenv('LLM_ADDR', '미설정')})")
+
+    if llm_status["claude_available"]:
+        st.write("✅ Claude 사용 가능 (fallback)")
+    else:
+        st.write("⚪ Claude 미설정")
+
+    if llm_status["last_provider"]:
+        st.caption(f"마지막 사용: **{llm_status['last_provider']}** ({llm_status['last_model']})")
+
+    if not llm_status["any_available"]:
+        st.warning("⚙️ vLLM 주소 또는 Anthropic API 키를 설정해주세요.")
+
+    st.caption("**기타 API**")
     st.write(f"{'✅' if blogger_ok else '❌'} Blogger ID")
     st.write(f"🖼️ 이미지: {img_prov.upper()}")
-
-    if not llm_ok:
-        st.warning("⚙️ 설정에서 LLM 서버 주소를 입력하세요.")
 
 # ════════════════════════════════════════════════════════
 # STEP 1: 트렌드 수집
@@ -594,8 +608,18 @@ elif cur == "settings":
         llm_model   = st.text_input("LLM 모델명",     value=os.getenv("LLM_MODEL", "google/gemma-4-31b-it"))
         llm_api_key = st.text_input("LLM API Key",    value=os.getenv("LLM_API_KEY", "EMPTY"), type="password")
 
+        st.markdown("### 🤖 Claude (LLM Fallback / 이미지)")
+        claude_model  = st.selectbox(
+            "Claude 모델 (vLLM 불가 시 자동 사용)",
+            ["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-8"],
+            index=["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-8"].index(
+                os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
+            ) if os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6") in
+                ["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-8"] else 0,
+        )
+
         st.markdown("### 🖼️ 이미지 생성")
-        _opts     = ["pollinations", "claude", "dalle"]
+        _opts     = ["pollinations", "picsum", "huggingface", "claude", "dalle"]
         _cur_prov = os.getenv("IMAGE_PROVIDER", "pollinations")
         _idx      = _opts.index(_cur_prov) if _cur_prov in _opts else 0
         img_provider   = st.selectbox("이미지 생성 방식", _opts, index=_idx)
@@ -640,6 +664,7 @@ IMAGE_PROVIDER={img_provider}
 ANTHROPIC_API_KEY={anthropic_key}
 OPENAI_API_KEY={openai_key}
 HUGGINGFACE_TOKEN={hf_token}
+CLAUDE_MODEL={claude_model}
 
 # ── Google Blogger ────────────────────────────────────
 BLOGGER_BLOG_ID={blog_id}
