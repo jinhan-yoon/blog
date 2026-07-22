@@ -7,3 +7,5 @@ __pycache__/
 .env
 client_secret.json
 token.json
+naver_session.json
+naver_errors/

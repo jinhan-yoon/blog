@@ -110,6 +110,7 @@ def init_session():
         "image_data":         [],
         "final_html":         "",
         "publish_result":     None,
+        "naver_publish_result": None,
         "publish_history":      [],
         "oauth_url":            None,
         "oauth_redirect_uri":   None,
@@ -175,8 +176,10 @@ with st.sidebar:
 
     # LLM / API 상태
     from modules.content_generator import check_llm_status
+    from modules.naver_blog_poster import check_session_status as check_naver_status
     llm_status = check_llm_status()
     blogger_ok = bool(os.getenv("BLOGGER_BLOG_ID", ""))
+    naver_status = check_naver_status()
     img_prov   = os.getenv("IMAGE_PROVIDER", "pollinations")
 
     st.caption("**API 상태**")
@@ -184,7 +187,9 @@ with st.sidebar:
     claude_icon = "✅" if llm_status["claude_available"] else "⚪"
     st.markdown(
         f"{vllm_icon} vLLM &nbsp;|&nbsp; {claude_icon} Claude  \n"
-        f"{'✅' if blogger_ok else '❌'} Blogger &nbsp;|&nbsp; 🖼️ {img_prov}",
+        f"{'✅' if blogger_ok else '❌'} Blogger &nbsp;|&nbsp; "
+        f"{'✅' if naver_status['ready'] else '❌'} 네이버  \n"
+        f"🖼️ {img_prov}",
         unsafe_allow_html=True,
     )
     if llm_status["last_provider"]:
@@ -622,6 +627,28 @@ elif cur == "publish":
 
                 st.divider()
 
+                from modules.naver_blog_poster import check_session_status
+                naver_auth = check_session_status()
+
+                st.markdown("**네이버 블로그:**")
+                st.write(f"{'✅' if naver_auth['credentials'] else '❌'} NAVER_ID / NAVER_PW")
+                st.write(f"{'✅' if naver_auth['session'] else '⚠️'} naver_session.json")
+                st.write(f"{'✅' if naver_auth['blog_id'] else '❌'} Blog ID")
+
+                if not naver_auth["ready"]:
+                    st.markdown('<div class="warn-box">⚠️ 설정 메뉴에서 네이버 계정을 입력하고, '
+                                '터미널에서 <code>python naver_setup.py</code>를 실행해 로그인을 완료해주세요.</div>',
+                                unsafe_allow_html=True)
+
+                also_naver = st.checkbox(
+                    "🟢 네이버 블로그도 함께 발행",
+                    value=False,
+                    disabled=not naver_auth["ready"],
+                    help="체크하면 '🚀 즉시 발행' 클릭 시 네이버 블로그에도 동일한 제목·본문·태그로 발행합니다.",
+                )
+
+                st.divider()
+
                 if st.button("💿 로컬 저장 (data 폴더)", use_container_width=True):
                     try:
                         import json as _json
@@ -676,6 +703,17 @@ elif cur == "publish":
                                 st.session_state.publish_result = result
                                 if not result.get("error"):
                                     st.session_state.publish_history.append(result)
+
+                                if also_naver:
+                                    from modules.naver_blog_poster import publish_post as naver_publish_post
+                                    naver_result = naver_publish_post(
+                                        title=final_title,
+                                        content_html=final_html,
+                                        tags=st.session_state.post_tags,
+                                    )
+                                    st.session_state.naver_publish_result = naver_result
+                                else:
+                                    st.session_state.naver_publish_result = None
                             st.rerun()
                         except Exception as e:
                             st.session_state.publish_result = {"error": str(e)}
@@ -684,13 +722,27 @@ elif cur == "publish":
             if st.session_state.publish_result:
                 result = st.session_state.publish_result
                 if result.get("error"):
-                    st.error(f"❌ 발행 실패: {result['error']}")
+                    st.error(f"❌ Blogger 발행 실패: {result['error']}")
                 else:
                     st.markdown(f"""
                     <div class="success-box">
-                    ✅ <b>발행 성공!</b><br>
+                    ✅ <b>Blogger 발행 성공!</b><br>
                     📎 URL: <a href="{result.get('url', '')}" target="_blank">{result.get('url', '')}</a><br>
                     📅 발행일: {result.get('published', '')}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            if st.session_state.naver_publish_result:
+                naver_result = st.session_state.naver_publish_result
+                if naver_result.get("error"):
+                    st.error(f"❌ 네이버 발행 실패: {naver_result['error']}")
+                    if naver_result.get("screenshot"):
+                        st.caption(f"오류 스크린샷 저장됨: {naver_result['screenshot']}")
+                else:
+                    st.markdown(f"""
+                    <div class="success-box">
+                    ✅ <b>네이버 블로그 발행 성공!</b><br>
+                    📎 URL: <a href="{naver_result.get('url', '')}" target="_blank">{naver_result.get('url', '')}</a>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -885,6 +937,25 @@ elif cur == "settings":
                                        help="huggingface.co 회원가입 후 Settings > Access Tokens에서 무료 발급")
 
     with col2:
+        st.markdown("### 🟢 네이버 블로그")
+        naver_id = st.text_input("네이버 아이디", value=os.getenv("NAVER_ID", ""))
+        naver_pw = st.text_input("네이버 비밀번호", value=os.getenv("NAVER_PW", ""), type="password")
+        naver_blog_id = st.text_input("네이버 블로그 ID", value=os.getenv("NAVER_BLOG_ID", ""),
+                                       help="블로그 주소 blog.naver.com/{ID} 의 {ID} 부분")
+
+        from modules.naver_blog_poster import check_session_status as _naver_status
+        _nstat = _naver_status()
+        st.write(f"{'✅' if _nstat['session'] else '⚠️'} naver_session.json "
+                 f"{'(로그인 세션 있음)' if _nstat['session'] else '(로그인 필요)'}")
+        if not _nstat["session"]:
+            st.markdown(
+                '<div class="warn-box">⚠️ 설정 저장 후 터미널에서 <code>python naver_setup.py</code>를 '
+                '실행해 최초 1회 수동 로그인을 완료해주세요.</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.divider()
+
         st.markdown("### 📝 Google Blogger")
         blog_id = st.text_input("Blogger Blog ID", value=os.getenv("BLOGGER_BLOG_ID", ""))
         if st.button("🔌 블로그 연결 테스트", use_container_width=True):
@@ -1017,6 +1088,11 @@ CLAUDE_MODEL={claude_model}
 
 # ── Google Blogger ────────────────────────────────────
 BLOGGER_BLOG_ID={blog_id}
+
+# ── 네이버 블로그 ──────────────────────────────────────
+NAVER_ID={naver_id}
+NAVER_PW={naver_pw}
+NAVER_BLOG_ID={naver_blog_id}
 """
         with open(".env", "w") as f:
             f.write(env_content)

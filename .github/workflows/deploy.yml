@@ -23,7 +23,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Validate app.py syntax
-        run: python -m py_compile app.py && echo "✅ app.py OK"
+        run: python -m py_compile app.py naver_setup.py && echo "✅ app.py OK"
 
       - name: Validate modules syntax
         run: |
@@ -61,6 +61,7 @@ jobs:
           fi
           venv/bin/pip install -q --upgrade pip
           venv/bin/pip install -q -r requirements.txt
+          venv/bin/playwright install --with-deps chromium
 
       - name: Register systemd service
         run: |
