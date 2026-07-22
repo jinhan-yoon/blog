@@ -1,15 +1,12 @@
-"""AI 블로그 자동화 대시보드 - 기능별 재구성 버전"""
+"""AI 블로그 자동화 대시보드 - 사이드바 네비게이션 버전"""
 
 import os
-import json
 import streamlit as st
 from dotenv import load_dotenv
 from pathlib import Path
-from datetime import datetime
 
 load_dotenv()
 
-# ── 페이지 설정 ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="AI 블로그 자동화 대시보드",
     page_icon="🤖",
@@ -17,92 +14,54 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── 전역 CSS ─────────────────────────────────────────────────────────────────
+# ── 페이지 정의 ──────────────────────────────────────────────────────────────
+PAGES = [
+    {"key": "trends",   "icon": "📊", "title": "트렌드 수집",   "step": 1},
+    {"key": "content",  "icon": "✍️", "title": "콘텐츠 작성",   "step": 2},
+    {"key": "media",    "icon": "🎨", "title": "미디어",         "step": 3},
+    {"key": "publish",  "icon": "🚀", "title": "발행",           "step": 4},
+    {"key": "settings", "icon": "⚙️", "title": "설정",           "step": None},
+    {"key": "manual",   "icon": "📚", "title": "매뉴얼",         "step": None},
+]
+PROCESS_KEYS = ["trends", "content", "media", "publish"]
+PAGE_KEYS    = [p["key"] for p in PAGES]
+
+# ── CSS ──────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+[data-testid="stSidebar"] { min-width: 230px; max-width: 260px; }
 .step-header {
     background: linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%);
-    color: white;
-    padding: 12px 20px;
-    border-radius: 10px;
-    margin-bottom: 16px;
-    font-weight: bold;
-    font-size: 1.1em;
+    color: white; padding: 12px 20px; border-radius: 10px;
+    margin-bottom: 20px; font-weight: bold; font-size: 1.2em;
 }
-.info-box {
-    background: #f0f9ff;
-    border-left: 4px solid #0ea5e9;
-    padding: 12px 16px;
-    border-radius: 0 8px 8px 0;
-    margin: 8px 0;
-}
-.success-box {
-    background: #f0fdf4;
-    border-left: 4px solid #22c55e;
-    padding: 12px 16px;
-    border-radius: 0 8px 8px 0;
-    margin: 8px 0;
-}
-.warn-box {
-    background: #fffbeb;
-    border-left: 4px solid #f59e0b;
-    padding: 12px 16px;
-    border-radius: 0 8px 8px 0;
-    margin: 8px 0;
-}
-.keyword-chip {
-    display: inline-block;
-    background: #ede9fe;
-    color: #5b21b6;
-    padding: 4px 12px;
-    border-radius: 20px;
-    margin: 3px;
-    font-size: 0.85em;
-    font-weight: 500;
-}
-.post-preview {
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 24px;
-    background: #fafafa;
-    color: #1f2937;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-}
-.dark .post-preview {
-    background: #1e293b;
-    color: #f1f5f9;
-}
+.info-box  { background:#f0f9ff; border-left:4px solid #0ea5e9; padding:12px 16px; border-radius:0 8px 8px 0; margin:8px 0; }
+.success-box { background:#f0fdf4; border-left:4px solid #22c55e; padding:12px 16px; border-radius:0 8px 8px 0; margin:8px 0; }
+.warn-box  { background:#fffbeb; border-left:4px solid #f59e0b; padding:12px 16px; border-radius:0 8px 8px 0; margin:8px 0; }
+.keyword-chip { display:inline-block; background:#ede9fe; color:#5b21b6; padding:4px 12px; border-radius:20px; margin:3px; font-size:0.85em; font-weight:500; }
+.post-preview { border:1px solid #e2e8f0; border-radius:12px; padding:24px; background:#fafafa; color:#1f2937; box-shadow:0 1px 4px rgba(0,0,0,0.08); }
+.tech-card { border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin:10px 0; background:#f8fafc; }
+.tech-badge { display:inline-block; background:#dbeafe; color:#1d4ed8; padding:3px 10px; border-radius:12px; font-size:0.8em; font-weight:600; margin:2px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── 세션 초기화 ──────────────────────────────────────────────────────────────
 def init_session():
     defaults = {
-        # 트렌드 관련
-        "trends": None,
-        "trends_history": {},
-        "selected_keywords": [],
-
-        # 콘텐츠 작성 관련
-        "post_topic": None,
-        "post_title": "",
-        "post_content_html": "",
-        "post_meta_desc": "",
-        "post_tags": [],
-        "image_prompts": [],
-        "topics": None,
-
-        # 미디어 관련
-        "image_urls": [],
-        "final_html": "",
-
-        # 발행 관련
-        "publish_result": None,
-        "publish_history": [],
-
-        # UI 상태
-        "content_mode": "create",  # "create" 또는 "edit"
-        "target_tab": None,  # 다음 탭으로 이동할 때 사용
+        "current_page":       "trends",
+        "trends":             None,
+        "selected_keywords":  [],
+        "post_topic":         None,
+        "post_title":         "",
+        "post_content_html":  "",
+        "post_meta_desc":     "",
+        "post_tags":          [],
+        "image_prompts":      [],
+        "topics":             None,
+        "image_urls":         [],
+        "final_html":         "",
+        "publish_result":     None,
+        "publish_history":    [],
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -110,86 +69,80 @@ def init_session():
 
 init_session()
 
-# ── 탭 자동전환 헬퍼 ──────────────────────────────────────────────────────
-def _auto_switch_tab(tab_index: int):
-    """JavaScript로 지정한 인덱스의 탭을 클릭 (0-base)"""
-    import streamlit.components.v1 as components
-    components.html(
-        f"""<script>
-        function switchTab() {{
-            var tabs = window.parent.document.querySelectorAll('button[role="tab"]');
-            console.log('탭 개수:', tabs.length, '목표 인덱스:', {tab_index});
-            if (tabs.length > {tab_index}) {{
-                tabs[{tab_index}].click();
-                console.log('탭 {tab_index} 클릭됨');
-            }}
-        }}
-        // 여러 번 시도
-        switchTab();
-        setTimeout(switchTab, 100);
-        setTimeout(switchTab, 300);
-        </script>""",
-        height=0,
-    )
-
-# 다음 탭으로 이동 (버튼 클릭 시 자동 전환)
-if st.session_state.get("target_tab") is not None:
-    target = st.session_state.target_tab
-    st.session_state.target_tab = None  # 바로 초기화
-    _auto_switch_tab(target)  # 탭 전환 실행
-
-# ── 사이드바 ─────────────────────────────────────────────────────────────────
+# ── 사이드바 네비게이션 ───────────────────────────────────────────────────────
 with st.sidebar:
     st.title("🤖 AI 블로그 자동화")
-    st.caption("Google Trends → Gemini → Blogger")
+    st.caption("Google Trends → vLLM → Blogger")
+    st.divider()
+
+    # 완료 상태 계산
+    step_done = {
+        "trends":  bool(st.session_state.selected_keywords),
+        "content": bool(st.session_state.post_content_html),
+        "media":   bool(st.session_state.final_html),
+        "publish": bool(
+            st.session_state.publish_result
+            and not st.session_state.publish_result.get("error")
+        ),
+    }
+    cur = st.session_state.current_page
+
+    st.markdown("**📋 프로세스**")
+    for page in PAGES[:4]:
+        key   = page["key"]
+        done  = step_done.get(key, False)
+        is_cur = key == cur
+        step_num = page["step"]
+
+        if is_cur:
+            prefix = "▶"
+        elif done:
+            prefix = "✅"
+        else:
+            prefix = str(step_num)
+
+        label = f"{prefix}  {page['icon']} {page['title']}"
+        if st.button(label, key=f"nav_{key}", use_container_width=True,
+                     type="primary" if is_cur else "secondary"):
+            st.session_state.current_page = key
+            st.rerun()
+
+    st.divider()
+    st.markdown("**🔧 기타**")
+    for page in PAGES[4:]:
+        key   = page["key"]
+        is_cur = key == cur
+        label = f"{'▶  ' if is_cur else ''}{page['icon']} {page['title']}"
+        if st.button(label, key=f"nav_{key}", use_container_width=True,
+                     type="primary" if is_cur else "secondary"):
+            st.session_state.current_page = key
+            st.rerun()
 
     st.divider()
 
-    # 진행 상황 요약
-    st.markdown("### 📋 진행 상황")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("선택된 키워드", len(st.session_state.selected_keywords))
-    with col2:
-        st.metric("작성된 글", "✓" if st.session_state.post_title else "✗")
-
-    st.divider()
-
-    # API 상태 표시
-    llm_ok = bool(os.getenv("LLM_ADDR", ""))
+    # API 상태
+    llm_ok    = bool(os.getenv("LLM_ADDR", ""))
     blogger_ok = bool(os.getenv("BLOGGER_BLOG_ID", ""))
-    image_provider = os.getenv("IMAGE_PROVIDER", "pollinations")
+    img_prov  = os.getenv("IMAGE_PROVIDER", "pollinations")
 
     st.caption("**API 연결 상태**")
-    st.write(f"{'✅' if llm_ok else '❌'} vLLM 서버 ({os.getenv('LLM_ADDR', '미설정')})")
+    st.write(f"{'✅' if llm_ok else '❌'} vLLM ({os.getenv('LLM_ADDR', '미설정')})")
     st.write(f"{'✅' if blogger_ok else '❌'} Blogger ID")
-    st.write(f"🖼️ 이미지: {image_provider.upper()}")
+    st.write(f"🖼️ 이미지: {img_prov.upper()}")
 
     if not llm_ok:
-        st.warning("⚙️ 설정 탭에서 LLM 서버 주소를 입력해주세요.")
-
-# ── 탭 구성 ──────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 트렌드 수집",
-    "✍️ 콘텐츠 작성",
-    "🎨 미디어",
-    "🚀 발행",
-    "⚙️ 설정",
-])
+        st.warning("⚙️ 설정에서 LLM 서버 주소를 입력하세요.")
 
 # ════════════════════════════════════════════════════════
-# TAB 1: 트렌드 수집
+# STEP 1: 트렌드 수집
 # ════════════════════════════════════════════════════════
-with tab1:
-    st.markdown('<div class="step-header">📊 트렌드 수집 및 관리</div>', unsafe_allow_html=True)
+if cur == "trends":
+    st.markdown('<div class="step-header">📊 STEP 1 · 트렌드 수집</div>', unsafe_allow_html=True)
 
     col1, col2 = st.columns([3, 1])
     with col1:
-        st.markdown("""
-        <div class="info-box">
-        Google 트렌드, 네이버, 다음에서 실시간 급상승 검색어를 자동으로 수집합니다.
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="info-box">Google 트렌드, 네이버에서 실시간 급상승 검색어를 자동으로 수집합니다.</div>',
+                    unsafe_allow_html=True)
     with col2:
         collect_btn = st.button("🔍 트렌드 수집 시작", type="primary", use_container_width=True)
 
@@ -201,8 +154,6 @@ with tab1:
 
     if st.session_state.trends:
         trends = st.session_state.trends
-
-        # ── 수집된 키워드 리스트 표시 ──────────────────────────────────────
         col_n, col_g = st.columns(2)
 
         with col_n:
@@ -221,14 +172,12 @@ with tab1:
             if google_kws:
                 for kw in google_kws[:20]:
                     traffic = kw.get("traffic", "")
-                    traffic_str = f"  `{traffic}`" if traffic and traffic != "N/A" else ""
-                    st.markdown(f"`{str(kw['rank']).zfill(2)}` **{kw['keyword']}**{traffic_str}")
+                    ts = f"  `{traffic}`" if traffic and traffic != "N/A" else ""
+                    st.markdown(f"`{str(kw['rank']).zfill(2)}` **{kw['keyword']}**{ts}")
             else:
                 st.info("구글 데이터 없음")
 
         st.divider()
-
-        # ── 키워드 선택 ────────────────────────────────────────────────────
         st.markdown("**📌 콘텐츠 작성에 사용할 키워드를 선택하세요:**")
         merged = trends["merged"]
 
@@ -238,12 +187,8 @@ with tab1:
             with cols[i % 3]:
                 caret = f" {kw.get('caret', '')}" if kw.get("caret") else ""
                 label = f"**{kw['keyword']}**  \n`{kw['source']}`{caret} · {kw['traffic']}"
-                checked = st.checkbox(
-                    label,
-                    key=f"kw_{i}",
-                    value=kw["keyword"] in st.session_state.selected_keywords,
-                )
-                if checked:
+                if st.checkbox(label, key=f"kw_{i}",
+                               value=kw["keyword"] in st.session_state.selected_keywords):
                     selected.append(kw["keyword"])
 
         st.session_state.selected_keywords = selected
@@ -258,23 +203,21 @@ with tab1:
             col1, col2 = st.columns([3, 1])
             with col2:
                 if st.button("✍️ 콘텐츠 작성 →", type="primary", use_container_width=True):
-                    st.session_state.target_tab = 1
+                    st.session_state.current_page = "content"
                     st.rerun()
 
 # ════════════════════════════════════════════════════════
-# TAB 2: 콘텐츠 작성 (주제 선정 + 본문 생성 통합)
+# STEP 2: 콘텐츠 작성
 # ════════════════════════════════════════════════════════
-with tab2:
-    st.markdown('<div class="step-header">✍️ 콘텐츠 작성</div>', unsafe_allow_html=True)
+elif cur == "content":
+    st.markdown('<div class="step-header">✍️ STEP 2 · 콘텐츠 작성</div>', unsafe_allow_html=True)
 
     if not st.session_state.selected_keywords:
-        st.markdown('<div class="warn-box">⚠️ 먼저 "트렌드 수집" 탭에서 키워드를 선택해주세요.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="warn-box">⚠️ 먼저 트렌드 수집에서 키워드를 선택해주세요.</div>',
+                    unsafe_allow_html=True)
     else:
-        # ────────────────────────────────────────────────────────────────
-        # STEP 1: 주제 선정 섹션
-        # ────────────────────────────────────────────────────────────────
-        st.markdown("### 🎯 STEP 1: 주제 선정")
-
+        # ── 2-1: 주제 선정 ──────────────────────────────────────────────────
+        st.markdown("### 🎯 2-1 · 주제 선정")
         selected_kws = st.session_state.selected_keywords
         st.markdown(f"**선택된 키워드:** {', '.join(selected_kws)}")
 
@@ -296,54 +239,45 @@ with tab2:
                     st.session_state.topics = None
             st.rerun()
 
-        # 이전에 추천받은 주제가 있으면 표시
-        topic_container = st.container()
-        with topic_container:
-            if 'topics' in st.session_state and st.session_state.topics:
-                topics = st.session_state.topics
-                st.divider()
-                st.markdown("**추천 주제 목록:**")
-
-                for i, topic in enumerate(topics):
-                    col1, col2 = st.columns([5, 1])
-                    with col1:
-                        st.markdown(f"**{i+1}. {topic['title']}**")
-                        st.caption(f"📌 주제: {topic['topic']}")
-                        st.caption(f"💡 이유: {topic['reason']}")
-                        chips = " ".join([f'<span class="keyword-chip">{k}</span>' for k in topic.get("keywords", [])])
-                        st.markdown(chips, unsafe_allow_html=True)
-                    with col2:
-                        if st.button("📝 선택", key=f"topic_{i}", use_container_width=True):
-                            st.session_state.post_topic = topic
-                            st.session_state.post_title = topic["title"]
-                            st.session_state.topics = None  # 주제 목록 초기화
-                            st.success("주제가 선택되었습니다!")
-                            st.rerun()
-                    st.divider()
-
-                # 직접 입력 옵션
-                with st.expander("또는 직접 제목 입력"):
-                    custom_title = st.text_input("사용자 정의 제목", value=st.session_state.post_title)
-                    if custom_title and custom_title != st.session_state.post_title:
-                        st.session_state.post_title = custom_title
-                        st.success("제목이 입력되었습니다!")
+        if st.session_state.topics:
+            st.divider()
+            st.markdown("**추천 주제 목록:**")
+            for i, topic in enumerate(st.session_state.topics):
+                col1, col2 = st.columns([5, 1])
+                with col1:
+                    st.markdown(f"**{i+1}. {topic['title']}**")
+                    st.caption(f"📌 주제: {topic['topic']}")
+                    st.caption(f"💡 이유: {topic['reason']}")
+                    chips = " ".join([f'<span class="keyword-chip">{k}</span>'
+                                      for k in topic.get("keywords", [])])
+                    st.markdown(chips, unsafe_allow_html=True)
+                with col2:
+                    if st.button("📝 선택", key=f"topic_{i}", use_container_width=True):
+                        st.session_state.post_topic = topic
+                        st.session_state.post_title = topic["title"]
+                        st.session_state.topics = None
                         st.rerun()
+                st.divider()
 
-        # ────────────────────────────────────────────────────────────────
-        # STEP 2: 본문 생성 섹션
-        # ────────────────────────────────────────────────────────────────
+            with st.expander("직접 제목 입력"):
+                custom_title = st.text_input("사용자 정의 제목", value=st.session_state.post_title)
+                if st.button("✅ 이 제목 사용") and custom_title:
+                    st.session_state.post_title = custom_title
+                    st.session_state.topics = None
+                    st.rerun()
+
+        # ── 2-2: 본문 생성 ──────────────────────────────────────────────────
         if st.session_state.post_title:
             st.divider()
-            st.markdown("### ✍️ STEP 2: 본문 생성")
-
+            st.markdown("### ✍️ 2-2 · 본문 생성")
             st.markdown(f"**선택된 제목:** {st.session_state.post_title}")
 
             col1, col2, col3 = st.columns(3)
             with col1:
                 tone = st.selectbox("톤앤매너", ["정보전달", "친근한", "전문적", "뉴스형"])
             with col2:
-                topic_kws = st.session_state.post_topic.get("keywords", []) if st.session_state.post_topic else st.session_state.selected_keywords
-                extra_kw = st.text_input("추가 키워드 (쉼표 구분)", value=", ".join(topic_kws))
+                kw_default = st.session_state.post_topic.get("keywords", []) if st.session_state.post_topic else selected_kws
+                extra_kw = st.text_input("추가 키워드 (쉼표 구분)", value=", ".join(kw_default))
             with col3:
                 st.markdown("<br>", unsafe_allow_html=True)
                 gen_btn = st.button("🤖 본문 생성", type="primary", use_container_width=True)
@@ -354,21 +288,19 @@ with tab2:
                     try:
                         from modules.content_generator import generate_blog_post
                         result = generate_blog_post(st.session_state.post_title, kws, tone)
-                        st.session_state.post_title = result.get("title", st.session_state.post_title)
+                        st.session_state.post_title        = result.get("title", st.session_state.post_title)
                         st.session_state.post_content_html = result.get("content_html", "")
-                        st.session_state.post_meta_desc = result.get("meta_description", "")
-                        st.session_state.post_tags = result.get("tags", [])
-                        st.session_state.image_prompts = result.get("image_prompts", [])
+                        st.session_state.post_meta_desc    = result.get("meta_description", "")
+                        st.session_state.post_tags         = result.get("tags", [])
+                        st.session_state.image_prompts     = result.get("image_prompts", [])
                         st.success("✅ 본문이 생성되었습니다!")
                     except Exception as e:
                         st.error(f"오류: {e}")
                 st.rerun()
 
-            # 본문 편집
             if st.session_state.post_content_html:
                 st.divider()
-
-                col1, col2 = st.columns([1, 1])
+                col1, col2 = st.columns(2)
                 with col1:
                     st.markdown("**📝 본문 편집**")
                     edited_html = st.text_area(
@@ -378,13 +310,12 @@ with tab2:
                     )
                     st.session_state.post_content_html = edited_html
 
-                    # AI로 수정 요청
-                    refine_instruction = st.text_input("✏️ AI에게 수정 요청 (예: '더 친근하게 바꿔줘', '길이를 늘려줘')")
-                    if st.button("🤖 AI 수정 적용") and refine_instruction:
+                    refine = st.text_input("✏️ AI에게 수정 요청 (예: '더 친근하게', '길이를 늘려줘')")
+                    if st.button("🤖 AI 수정 적용") and refine:
                         with st.spinner("수정 중..."):
                             try:
                                 from modules.content_generator import refine_content
-                                st.session_state.post_content_html = refine_content(edited_html, refine_instruction)
+                                st.session_state.post_content_html = refine_content(edited_html, refine)
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"오류: {e}")
@@ -396,64 +327,77 @@ with tab2:
                         f'<h2>{st.session_state.post_title}</h2>'
                         f'{st.session_state.post_content_html}'
                         f'</div>',
-                        unsafe_allow_html=True
+                        unsafe_allow_html=True,
                     )
 
                 st.divider()
                 col1, col2 = st.columns(2)
                 with col1:
-                    tags_input = st.text_input("태그 (쉼표 구분)", value=", ".join(st.session_state.post_tags))
+                    tags_input = st.text_input("태그 (쉼표 구분)",
+                                               value=", ".join(st.session_state.post_tags))
                     st.session_state.post_tags = [t.strip() for t in tags_input.split(",") if t.strip()]
                 with col2:
-                    meta_desc = st.text_area("메타 설명 (SEO)", value=st.session_state.post_meta_desc, height=80)
+                    meta_desc = st.text_area("메타 설명 (SEO)",
+                                             value=st.session_state.post_meta_desc, height=80)
                     st.session_state.post_meta_desc = meta_desc
 
                 st.divider()
-                col1, col2 = st.columns([3, 1])
+                _, col2 = st.columns([3, 1])
                 with col2:
                     if st.button("🎨 미디어 →", type="primary", use_container_width=True):
-                        st.session_state.target_tab = 2
+                        st.session_state.current_page = "media"
                         st.rerun()
 
 # ════════════════════════════════════════════════════════
-# TAB 3: 미디어 (이미지 생성)
+# STEP 3: 미디어
 # ════════════════════════════════════════════════════════
-with tab3:
-    st.markdown('<div class="step-header">🎨 미디어 · 이미지 생성 및 삽입</div>', unsafe_allow_html=True)
+elif cur == "media":
+    st.markdown('<div class="step-header">🎨 STEP 3 · 미디어 · 이미지 생성</div>', unsafe_allow_html=True)
 
     if not st.session_state.post_content_html:
-        st.markdown('<div class="warn-box">⚠️ "콘텐츠 작성" 탭에서 본문을 먼저 작성해주세요.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="warn-box">⚠️ 먼저 콘텐츠 작성 단계를 완료해주세요.</div>',
+                    unsafe_allow_html=True)
     else:
         provider = os.getenv("IMAGE_PROVIDER", "pollinations")
-        st.markdown(f"**이미지 생성 방식:** `{provider.upper()}`  (설정 탭에서 변경)")
+        st.markdown(f"**이미지 생성 방식:** `{provider.upper()}`  (설정에서 변경)")
 
-        # 항상 3개의 이미지 프롬프트 표시
         if not st.session_state.image_prompts:
             st.session_state.image_prompts = ["blog post illustration", "relevant image", "article image"]
 
         st.markdown("**AI가 제안한 이미지 프롬프트 (수정 가능):**")
         edited_prompts = []
         for i in range(3):
-            current_prompt = st.session_state.image_prompts[i] if i < len(st.session_state.image_prompts) else ""
-            edited = st.text_input(f"이미지 {i+1} 설명", value=current_prompt, key=f"img_prompt_{i}")
-            edited_prompts.append(edited)
+            cur_prompt = st.session_state.image_prompts[i] if i < len(st.session_state.image_prompts) else ""
+            edited_prompts.append(st.text_input(f"이미지 {i+1} 설명", value=cur_prompt, key=f"ip_{i}"))
         st.session_state.image_prompts = edited_prompts
 
-        gen_img_btn = st.button("🖼️ 이미지 생성 & 본문 삽입", type="primary")
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col2:
+            gen_img_btn = st.button("🖼️ 이미지 생성 & 삽입", type="primary", use_container_width=True)
+        with col3:
+            skip_btn = st.button("⏭️ 이미지 건너뛰기", use_container_width=True)
 
         if gen_img_btn:
-            prompts = st.session_state.image_prompts[:3]
-            with st.spinner(f"{len(prompts)}개 이미지 생성 중..."):
+            with st.spinner(f"이미지 3개 생성 중..."):
                 try:
                     from modules.image_generator import generate_images_for_post, insert_images_into_html
-                    st.session_state.image_urls = generate_images_for_post(prompts, provider)
+                    st.session_state.image_urls = generate_images_for_post(
+                        st.session_state.image_prompts[:3], provider
+                    )
                     st.session_state.final_html = insert_images_into_html(
                         st.session_state.post_content_html,
                         st.session_state.image_urls,
                     )
-                    st.success("✅ 이미지 삽입 완료!")
+                    st.success("✅ 이미지 삽입 완료! 발행 단계로 이동합니다.")
                 except Exception as e:
                     st.error(f"오류: {e}")
+            if st.session_state.final_html:
+                st.session_state.current_page = "publish"
+                st.rerun()
+
+        if skip_btn:
+            st.session_state.final_html = st.session_state.post_content_html
+            st.session_state.current_page = "publish"
             st.rerun()
 
         if st.session_state.image_urls:
@@ -463,38 +407,26 @@ with tab3:
             for i, url in enumerate(st.session_state.image_urls):
                 with cols[i % 3]:
                     st.image(url, caption=f"이미지 {i+1}", use_container_width=True)
-            st.divider()
 
-        if not st.session_state.final_html and st.session_state.post_content_html:
             st.divider()
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                if st.button("⏭️ 이미지 없이 다음 단계로 진행"):
-                    st.session_state.final_html = st.session_state.post_content_html
-                    st.success("이미지 단계를 건너뛰었습니다!")
-                    st.rerun()
-            with col2:
-                pass
-
-        if st.session_state.final_html:
-            st.divider()
-            col1, col2 = st.columns([3, 1])
+            _, col2 = st.columns([3, 1])
             with col2:
                 if st.button("🚀 발행 →", type="primary", use_container_width=True):
-                    st.session_state.target_tab = 3
+                    st.session_state.current_page = "publish"
                     st.rerun()
 
 # ════════════════════════════════════════════════════════
-# TAB 4: 발행 (미리보기 + 발행 + 포스팅 관리)
+# STEP 4: 발행
 # ════════════════════════════════════════════════════════
-with tab4:
-    st.markdown('<div class="step-header">🚀 발행 및 포스팅 관리</div>', unsafe_allow_html=True)
+elif cur == "publish":
+    st.markdown('<div class="step-header">🚀 STEP 4 · 발행</div>', unsafe_allow_html=True)
 
     final_html = st.session_state.final_html or st.session_state.post_content_html
     title = st.session_state.post_title
 
     if not final_html:
-        st.markdown('<div class="warn-box">⚠️ 콘텐츠를 작성한 후 이 탭에서 발행하세요.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="warn-box">⚠️ 콘텐츠를 먼저 작성해주세요.</div>',
+                    unsafe_allow_html=True)
     else:
         col1, col2 = st.columns([2, 1])
 
@@ -507,18 +439,15 @@ with tab4:
                 f'<hr/>'
                 f'{final_html}'
                 f'</div>',
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
 
         with col2:
             st.markdown("**🚀 발행 설정**")
-
             final_title = st.text_input("제목 최종 확인", value=title)
-            is_draft = st.checkbox("임시저장으로 발행 (바로 공개하지 않음)", value=False)
 
             st.divider()
 
-            # Blogger 인증 상태 확인
             from modules.blogger_publisher import check_auth_status
             auth = check_auth_status()
 
@@ -527,22 +456,17 @@ with tab4:
             st.write(f"{'✅' if auth.get('token_valid') else '⚠️'} OAuth 토큰")
             st.write(f"{'✅' if auth['blog_id'] else '❌'} Blog ID")
 
-            st.divider()
-
             if not auth["ready"]:
-                st.markdown("""
-                <div class="warn-box">
-                ⚠️ <b>Blogger 연동 미완료</b><br>
-                설정 탭에서 client_secret.json 업로드 및 Blog ID를 설정하세요.
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown('<div class="warn-box">⚠️ 설정 메뉴에서 Blogger 연동을 완료해주세요.</div>',
+                            unsafe_allow_html=True)
 
-            col_draft, col_pub = st.columns(2)
-            with col_draft:
+            st.divider()
+            c1, c2 = st.columns(2)
+            with c1:
                 if st.button("💾 임시저장", use_container_width=True):
                     from modules.blogger_publisher import publish_post
                     try:
-                        with st.spinner("Blogger에 발행 중..."):
+                        with st.spinner("저장 중..."):
                             result = publish_post(
                                 title=final_title,
                                 content_html=final_html,
@@ -552,15 +476,15 @@ with tab4:
                             st.session_state.publish_result = result
                             if not result.get("error"):
                                 st.session_state.publish_history.append(result)
-                            st.rerun()
+                        st.rerun()
                     except Exception as e:
                         st.session_state.publish_result = {"error": str(e)}
                         st.rerun()
-            with col_pub:
+            with c2:
                 if st.button("🚀 즉시 발행", type="primary", use_container_width=True):
                     from modules.blogger_publisher import publish_post
                     try:
-                        with st.spinner("Blogger에 발행 중..."):
+                        with st.spinner("발행 중..."):
                             result = publish_post(
                                 title=final_title,
                                 content_html=final_html,
@@ -570,7 +494,7 @@ with tab4:
                             st.session_state.publish_result = result
                             if not result.get("error"):
                                 st.session_state.publish_history.append(result)
-                            st.rerun()
+                        st.rerun()
                     except Exception as e:
                         st.session_state.publish_result = {"error": str(e)}
                         st.rerun()
@@ -589,20 +513,7 @@ with tab4:
                 """, unsafe_allow_html=True)
 
         st.divider()
-        col1, col2 = st.columns([3, 1])
-        with col2:
-            if st.button("⚙️ 설정 →", type="primary", use_container_width=True):
-                st.session_state.target_tab = 4
-                st.rerun()
-
-        # ────────────────────────────────────────────────────────────────
-        # 포스팅 관리 섹션
-        # ────────────────────────────────────────────────────────────────
-        st.divider()
         st.markdown("### 📋 최근 포스팅")
-
-        from modules.blogger_publisher import check_auth_status
-        auth = check_auth_status()
 
         if st.button("🔄 포스팅 목록 새로고침"):
             if auth["ready"]:
@@ -611,11 +522,12 @@ with tab4:
                     posts = list_recent_posts()
                     for p in posts:
                         status_icon = "🟢" if p["status"] == "LIVE" else "📝"
-                        col1, col2 = st.columns([4, 1])
-                        with col1:
-                            st.markdown(f"{status_icon} [{p['title']}]({p.get('url', '#')}) · {p['published'][:10] if p['published'] else ''}")
-                        with col2:
-                            if st.button("삭제", key=f"delete_{p['id']}", use_container_width=True):
+                        c1, c2 = st.columns([4, 1])
+                        with c1:
+                            st.markdown(f"{status_icon} [{p['title']}]({p.get('url', '#')}) · "
+                                        f"{p['published'][:10] if p['published'] else ''}")
+                        with c2:
+                            if st.button("삭제", key=f"del_{p['id']}", use_container_width=True):
                                 st.info("(삭제 기능은 다음 버전에서 추가됩니다)")
                 except Exception as e:
                     st.error(f"조회 실패: {e}")
@@ -623,71 +535,36 @@ with tab4:
                 st.warning("Blogger 인증이 필요합니다.")
 
 # ════════════════════════════════════════════════════════
-# TAB 5: 설정
+# 설정
 # ════════════════════════════════════════════════════════
-with tab5:
+elif cur == "settings":
     st.markdown('<div class="step-header">⚙️ 설정 · API 키 및 환경 구성</div>', unsafe_allow_html=True)
-
-    env_path = Path(".env")
 
     col1, col2 = st.columns(2)
 
     with col1:
         st.markdown("### 🤖 LLM 서버 (vLLM)")
-        llm_addr = st.text_input(
-            "LLM 서버 주소",
-            value=os.getenv("LLM_ADDR", "http://210.127.59.40:8000"),
-            help="vLLM OpenAI 호환 서버 주소 (예: http://host:8000)"
-        )
-        llm_model = st.text_input(
-            "LLM 모델명",
-            value=os.getenv("LLM_MODEL", "google/gemma-4-31b-it"),
-        )
-        llm_api_key = st.text_input(
-            "LLM API Key",
-            value=os.getenv("LLM_API_KEY", "EMPTY"),
-            type="password",
-            help="vLLM은 보통 EMPTY 사용"
-        )
+        llm_addr    = st.text_input("LLM 서버 주소",  value=os.getenv("LLM_ADDR", "http://210.127.59.40:8000"))
+        llm_model   = st.text_input("LLM 모델명",     value=os.getenv("LLM_MODEL", "google/gemma-4-31b-it"))
+        llm_api_key = st.text_input("LLM API Key",    value=os.getenv("LLM_API_KEY", "EMPTY"), type="password")
 
         st.markdown("### 🖼️ 이미지 생성")
-        _provider_opts = ["pollinations", "claude", "dalle"]
-        _cur_provider = os.getenv("IMAGE_PROVIDER", "pollinations")
-        _provider_idx = _provider_opts.index(_cur_provider) if _cur_provider in _provider_opts else 0
-        img_provider = st.selectbox(
-            "이미지 생성 방식",
-            _provider_opts,
-            index=_provider_idx,
-            help="pollinations: 무료 / claude: Claude 프롬프트 강화 후 Pollinations 렌더링 / dalle: OpenAI API 키 필요"
-        )
-        anthropic_key = st.text_input(
-            "Anthropic API Key (Claude용)",
-            value=os.getenv("ANTHROPIC_API_KEY", ""),
-            type="password",
-        )
-        openai_key = st.text_input(
-            "OpenAI API Key (DALL-E 3용)",
-            value=os.getenv("OPENAI_API_KEY", ""),
-            type="password",
-        )
+        _opts     = ["pollinations", "claude", "dalle"]
+        _cur_prov = os.getenv("IMAGE_PROVIDER", "pollinations")
+        _idx      = _opts.index(_cur_prov) if _cur_prov in _opts else 0
+        img_provider   = st.selectbox("이미지 생성 방식", _opts, index=_idx)
+        anthropic_key  = st.text_input("Anthropic API Key (Claude용)", value=os.getenv("ANTHROPIC_API_KEY", ""), type="password")
+        openai_key     = st.text_input("OpenAI API Key (DALL-E 3용)", value=os.getenv("OPENAI_API_KEY", ""), type="password")
 
     with col2:
         st.markdown("### 📝 Google Blogger")
-        blog_id = st.text_input(
-            "Blogger Blog ID",
-            value=os.getenv("BLOGGER_BLOG_ID", ""),
-            help="블로그 URL: https://www.blogger.com/blog/posts/{Blog ID}"
-        )
+        blog_id = st.text_input("Blogger Blog ID", value=os.getenv("BLOGGER_BLOG_ID", ""))
 
-        st.markdown("### 🔑 OAuth 2.0 인증 파일")
-        uploaded_secret = st.file_uploader(
-            "client_secret.json 업로드",
-            type="json",
-            help="Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client ID"
-        )
-        if uploaded_secret:
+        st.markdown("### 🔑 OAuth 2.0 인증")
+        uploaded = st.file_uploader("client_secret.json 업로드", type="json")
+        if uploaded:
             with open("client_secret.json", "wb") as f:
-                f.write(uploaded_secret.read())
+                f.write(uploaded.read())
             st.success("✅ client_secret.json 저장됨")
 
         if Path("client_secret.json").exists():
@@ -701,52 +578,196 @@ with tab5:
                 Path("token.json").unlink()
                 st.info("토큰 삭제됨. 다음 발행 시 재인증이 필요합니다.")
         else:
-            st.info("ℹ️ OAuth 토큰 없음 (최초 발행 시 브라우저 인증 필요)")
+            st.info("ℹ️ OAuth 토큰 없음 (최초 발행 시 인증 필요)")
 
     st.divider()
     if st.button("💾 설정 저장", type="primary"):
-        env_content = f"""# ── LLM 서버 (vLLM, OpenAI 호환) ──────────────────────────────
+        env_content = f"""# ── LLM 서버 ──────────────────────────────────────────
 LLM_ADDR={llm_addr}
 LLM_MODEL={llm_model}
 LLM_API_KEY={llm_api_key}
 
-# ── 이미지 생성 ────────────────────────────────────────────────
+# ── 이미지 생성 ──────────────────────────────────────
 IMAGE_PROVIDER={img_provider}
 ANTHROPIC_API_KEY={anthropic_key}
 OPENAI_API_KEY={openai_key}
 
-# ── Google Blogger ──────────────────────────────────────────────
+# ── Google Blogger ────────────────────────────────────
 BLOGGER_BLOG_ID={blog_id}
 """
         with open(".env", "w") as f:
             f.write(env_content)
         load_dotenv(override=True)
-        st.success("✅ 설정이 .env 파일에 저장되었습니다. 페이지를 새로고침하세요.")
+        st.success("✅ 설정이 .env 파일에 저장되었습니다.")
 
     st.divider()
     st.markdown("### 📚 설정 가이드")
-    with st.expander("Claude (Anthropic) API 키 발급 방법"):
+    with st.expander("Claude (Anthropic) API 키 발급"):
         st.markdown("""
-        1. [Anthropic Console](https://console.anthropic.com) 접속
-        2. 로그인 후 **API Keys** 클릭
-        3. **Create Key** 로 새 키 생성 후 복사
-        4. 위 Anthropic API Key 입력란에 붙여넣기 후 저장
-        5. 이미지 생성 방식을 **claude** 로 선택하면 Claude가 프롬프트를 강화하여 Pollinations.ai로 이미지 생성
+1. [Anthropic Console](https://console.anthropic.com) 접속
+2. **API Keys** > **Create Key** 로 새 키 생성
+3. 위 Anthropic API Key 입력란에 붙여넣기 후 저장
+4. 이미지 생성 방식을 **claude** 로 선택하면 프롬프트를 강화하여 Pollinations.ai로 이미지 생성
         """)
-    with st.expander("Google Blogger API 설정 방법"):
+    with st.expander("Google Blogger API 설정"):
         st.markdown("""
-        1. [Google Cloud Console](https://console.cloud.google.com) 접속
-        2. 새 프로젝트 생성 또는 기존 프로젝트 선택
-        3. **APIs & Services > Library** 에서 **Blogger API v3** 활성화
-        4. **Credentials > Create Credentials > OAuth 2.0 Client ID** 생성
-           - Application type: **Desktop app**
-        5. JSON 다운로드 후 위에서 업로드
-        6. 블로그 ID 확인: Blogger 대시보드 URL에서 숫자 부분
+1. [Google Cloud Console](https://console.cloud.google.com) 접속
+2. **APIs & Services > Library** > **Blogger API v3** 활성화
+3. **Credentials > Create Credentials > OAuth 2.0 Client ID** (Desktop app) 생성
+4. JSON 다운로드 후 위에서 업로드
+5. 블로그 ID: Blogger 대시보드 URL의 숫자 부분
         """)
     with st.expander("Pollinations.ai (무료 이미지)"):
         st.markdown("""
-        - API 키 불필요, 완전 무료
-        - 요청당 이미지 1024×576 픽셀 생성
-        - 상업적 이용 가능
-        - 속도: 생성에 5-15초 소요
+- API 키 불필요, 완전 무료
+- 요청당 이미지 1024×576 픽셀 생성
+- 상업적 이용 가능 / 생성 소요 시간: 5-15초
         """)
+
+# ════════════════════════════════════════════════════════
+# 매뉴얼
+# ════════════════════════════════════════════════════════
+elif cur == "manual":
+    st.markdown('<div class="step-header">📚 기술 매뉴얼 · 사용된 기술 스택</div>', unsafe_allow_html=True)
+
+    st.markdown("""
+이 대시보드는 **AI 기반 블로그 자동화** 파이프라인으로,
+트렌드 수집부터 Google Blogger 발행까지 전 과정을 자동화합니다.
+    """)
+
+    st.markdown("## 🔄 전체 파이프라인")
+    st.code(
+        "트렌드 수집 → 키워드 선택 → 주제 추천 (vLLM) → 본문 생성 (vLLM) → 이미지 생성 → Blogger 발행",
+        language="text",
+    )
+
+    st.divider()
+    st.markdown("## 🏗️ 기술 스택")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("### 🖥️ 웹 프레임워크")
+        st.markdown("""
+<div class="tech-card">
+<b>Streamlit</b> <span class="tech-badge">v1.35+</span><br>
+Python으로 데이터 앱을 빠르게 만드는 오픈소스 프레임워크.<br>
+<code>st.session_state</code>로 단계별 데이터를 유지하며,<br>
+사이드바·컬럼·버튼 등 내장 컴포넌트를 활용합니다.
+</div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("### 🤖 AI / LLM")
+        st.markdown("""
+<div class="tech-card">
+<b>vLLM</b> <span class="tech-badge">자체 호스팅</span> <span class="tech-badge">OpenAI 호환</span><br>
+LLM을 고속 서빙하는 오픈소스 추론 엔진.<br>
+OpenAI API 형식과 호환되어 <code>openai</code> SDK로 통신합니다.<br><br>
+<b>Google Gemma 4 (31B-it)</b> <span class="tech-badge">LLM 모델</span><br>
+주제 추천·본문 생성·수정 요청에 사용되는 한국어 지원 LLM 모델.<br><br>
+<b>OpenAI SDK</b> <span class="tech-badge">v1.30+</span><br>
+vLLM 서버 통신 클라이언트. <code>base_url</code>을 vLLM 주소로 교체하여 사용.
+</div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("### 🖼️ 이미지 생성")
+        st.markdown("""
+<div class="tech-card">
+<b>Pollinations.ai</b> <span class="tech-badge">무료 · 기본값</span><br>
+API 키 없이 URL 파라미터로 이미지를 생성하는 무료 서비스.<br><br>
+<b>Anthropic Claude API</b> <span class="tech-badge">선택</span><br>
+이미지 프롬프트를 영어로 강화(Prompt Enhancement)한 후<br>
+Pollinations.ai로 렌더링하는 하이브리드 방식.<br><br>
+<b>OpenAI DALL-E 3</b> <span class="tech-badge">유료 · 선택</span><br>
+OpenAI API를 통해 고품질 이미지 생성. API 키 필요.
+</div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("### 📊 트렌드 수집")
+        st.markdown("""
+<div class="tech-card">
+<b>Loword API</b> (loword.co.kr) <span class="tech-badge">서드파티</span><br>
+네이버 + 구글 실시간 검색어를 날짜 기반으로 제공하는 API.<br>
+별도 인증 없이 JSON으로 순위·변동폭(caret)을 수집합니다.<br><br>
+<b>Google Trends RSS</b> <span class="tech-badge">공식</span><br>
+<code>trends.google.com</code> 공식 RSS 피드.<br>
+한국(KR) 실시간 급상승 검색어와 관련 뉴스를 파싱합니다.<br><br>
+<b>BeautifulSoup4 + lxml</b> <span class="tech-badge">v4.12+</span><br>
+RSS XML 및 HTML 콘텐츠 파싱 라이브러리.
+</div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("### 📝 발행 (Google Blogger)")
+        st.markdown("""
+<div class="tech-card">
+<b>Google Blogger API v3</b><br>
+Blogger 블로그에 포스팅을 생성·조회하는 REST API.<br>
+Google Cloud Console에서 활성화 후 사용.<br><br>
+<b>google-api-python-client</b> <span class="tech-badge">v2.120+</span><br>
+Google API 공식 Python 클라이언트 라이브러리.<br><br>
+<b>google-auth-oauthlib</b> <span class="tech-badge">v1.2+</span><br>
+OAuth 2.0 인증 흐름 처리.<br>
+<code>client_secret.json</code> + <code>token.json</code>으로 토큰을 발급·갱신합니다.
+</div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("### 🛠️ 유틸리티")
+        st.markdown("""
+<div class="tech-card">
+<b>python-dotenv</b> <span class="tech-badge">v1.0+</span><br>
+<code>.env</code> 파일에서 환경 변수를 로드. API 키·서버 주소 등 관리.<br><br>
+<b>Pillow</b> <span class="tech-badge">v10+</span><br>
+이미지 처리 라이브러리. 생성된 이미지 검증·처리에 활용.<br><br>
+<b>requests</b> <span class="tech-badge">v2.31+</span><br>
+HTTP 요청 라이브러리. 트렌드 API 호출 및 이미지 URL 요청에 사용.
+</div>
+        """, unsafe_allow_html=True)
+
+    st.divider()
+    st.markdown("## 📁 프로젝트 구조")
+    st.code("""
+blog/
+├── app.py                    # 메인 Streamlit 앱
+├── requirements.txt          # Python 패키지 목록
+├── .env                      # 환경 변수 (API 키 등, git 제외)
+├── .env.example              # 환경 변수 예시
+├── run.sh                    # 앱 실행 스크립트
+├── blog-streamlit.service    # systemd 서비스 설정 (Linux)
+└── modules/
+    ├── trend_collector.py    # 트렌드 수집 (Loword + Google RSS)
+    ├── content_generator.py  # LLM 콘텐츠 생성 (vLLM)
+    ├── image_generator.py    # 이미지 생성 (Pollinations/Claude/DALL-E)
+    └── blogger_publisher.py  # Blogger API 발행
+    """, language="text")
+
+    st.divider()
+    st.markdown("## ⚙️ 환경 변수")
+    st.markdown("""
+| 변수명 | 설명 | 예시 |
+|--------|------|------|
+| `LLM_ADDR` | vLLM 서버 주소 | `http://192.168.1.1:8000` |
+| `LLM_MODEL` | LLM 모델명 | `google/gemma-4-31b-it` |
+| `LLM_API_KEY` | vLLM API 키 (보통 EMPTY) | `EMPTY` |
+| `IMAGE_PROVIDER` | 이미지 생성 방식 | `pollinations` / `claude` / `dalle` |
+| `ANTHROPIC_API_KEY` | Claude API 키 | `sk-ant-...` |
+| `OPENAI_API_KEY` | OpenAI API 키 | `sk-...` |
+| `BLOGGER_BLOG_ID` | Blogger 블로그 ID | `1234567890` |
+    """)
+
+    st.divider()
+    st.markdown("## 🚀 실행 방법")
+    st.code("""
+# 1. 패키지 설치
+pip install -r requirements.txt
+
+# 2. 환경 변수 설정
+cp .env.example .env
+# .env 파일을 편집하여 API 키 입력
+
+# 3. 앱 실행
+streamlit run app.py --server.port 8501
+
+# 또는 run.sh 사용
+bash run.sh
+    """, language="bash")
