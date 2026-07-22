@@ -640,13 +640,6 @@ elif cur == "publish":
                                 '터미널에서 <code>python naver_setup.py</code>를 실행해 로그인을 완료해주세요.</div>',
                                 unsafe_allow_html=True)
 
-                also_naver = st.checkbox(
-                    "🟢 네이버 블로그도 함께 발행",
-                    value=False,
-                    disabled=not naver_auth["ready"],
-                    help="체크하면 '🚀 즉시 발행' 클릭 시 네이버 블로그에도 동일한 제목·본문·태그로 발행합니다.",
-                )
-
                 st.divider()
 
                 if st.button("💿 로컬 저장 (data 폴더)", use_container_width=True):
@@ -670,7 +663,7 @@ elif cur == "publish":
                         st.error(f"저장 실패: {e}")
 
                 st.divider()
-                c1, c2 = st.columns(2)
+                c1, c2, c3 = st.columns(3)
                 with c1:
                     if st.button("💾 Blogger 임시저장", use_container_width=True):
                         from modules.blogger_publisher import publish_post
@@ -690,10 +683,10 @@ elif cur == "publish":
                             st.session_state.publish_result = {"error": str(e)}
                             st.rerun()
                 with c2:
-                    if st.button("🚀 즉시 발행", type="primary", use_container_width=True):
+                    if st.button("🚀 구글 발행", type="primary", use_container_width=True):
                         from modules.blogger_publisher import publish_post
                         try:
-                            with st.spinner("발행 중..."):
+                            with st.spinner("구글 블로그 발행 중..."):
                                 result = publish_post(
                                     title=final_title,
                                     content_html=final_html,
@@ -703,21 +696,21 @@ elif cur == "publish":
                                 st.session_state.publish_result = result
                                 if not result.get("error"):
                                     st.session_state.publish_history.append(result)
-
-                                if also_naver:
-                                    from modules.naver_blog_poster import publish_post as naver_publish_post
-                                    naver_result = naver_publish_post(
-                                        title=final_title,
-                                        content_html=final_html,
-                                        tags=st.session_state.post_tags,
-                                    )
-                                    st.session_state.naver_publish_result = naver_result
-                                else:
-                                    st.session_state.naver_publish_result = None
                             st.rerun()
                         except Exception as e:
                             st.session_state.publish_result = {"error": str(e)}
                             st.rerun()
+                with c3:
+                    if st.button("🟢 네이버 발행", type="primary", use_container_width=True,
+                                 disabled=not naver_auth["ready"]):
+                        from modules.naver_blog_poster import publish_post as naver_publish_post
+                        with st.spinner("네이버 블로그 발행 중..."):
+                            st.session_state.naver_publish_result = naver_publish_post(
+                                title=final_title,
+                                content_html=final_html,
+                                tags=st.session_state.post_tags,
+                            )
+                        st.rerun()
 
             if st.session_state.publish_result:
                 result = st.session_state.publish_result
