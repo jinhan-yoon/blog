@@ -162,7 +162,8 @@ def generate_images_for_post(
     포스팅용 이미지 3개 생성.
 
     Returns:
-        [{"bytes": bytes|None, "provider": str, "error": str|None}, ...]
+        [{"bytes": bytes|None, "provider": str, "url": str, "prompt": str, "error": str|None}, ...]
+        url: Blogger HTML에 삽입할 외부 URL (base64 대신 사용)
     """
     prompts = (image_prompts or ["blog post illustration", "relevant image", "article image"])[:3]
     while len(prompts) < 3:
@@ -177,7 +178,15 @@ def generate_images_for_post(
 
         try:
             data, used_provider = generate_image_bytes(prompt, provider)
-            results.append({"bytes": data, "provider": used_provider, "error": None})
+            # Blogger에 삽입할 외부 URL 생성 (base64 차단 회피)
+            url = get_image_url(prompt, used_provider)
+            results.append({
+                "bytes": data,
+                "provider": used_provider,
+                "url": url,
+                "prompt": prompt,
+                "error": None,
+            })
             done_msg = f"✅ 이미지 {i+1} 완료 ({used_provider}, {len(data)//1024}KB)"
             print(done_msg)
             if log_callback:
@@ -187,7 +196,14 @@ def generate_images_for_post(
             print(err_msg)
             if log_callback:
                 log_callback(err_msg)
-            results.append({"bytes": None, "provider": None, "error": str(e)})
+            seed = (i + 1) * 100
+            results.append({
+                "bytes": None,
+                "provider": None,
+                "url": f"https://picsum.photos/seed/{seed}/1024/576",
+                "prompt": prompt,
+                "error": str(e),
+            })
 
     return results
 
@@ -213,19 +229,20 @@ def get_image_url(prompt: str, provider: str | None = None) -> str:
 def insert_images_into_html(content_html: str, image_data: list[dict]) -> str:
     """
     HTML 본문의 {IMAGE_N} 플레이스홀더를 이미지 태그로 교체.
+    Blogger는 base64 data: URL을 차단하므로 외부 URL을 우선 사용.
     image_data: generate_images_for_post()의 반환값
     """
     result = content_html
     for i, item in enumerate(image_data, 1):
-        if item.get("bytes"):
-            # bytes를 base64 data URL로 변환
+        # 외부 URL 우선 (Blogger 호환) → base64 → Picsum fallback
+        if item.get("url"):
+            src = item["url"]
+        elif item.get("bytes"):
             import base64
             b64 = base64.b64encode(item["bytes"]).decode()
             src = f"data:image/jpeg;base64,{b64}"
         else:
-            # 실패 시 Picsum placeholder
-            seed = i * 100
-            src = f"https://picsum.photos/seed/{seed}/1024/576"
+            src = f"https://picsum.photos/seed/{i * 100}/1024/576"
 
         img_tag = (
             f'<div style="text-align:center; margin:20px 0;">'
