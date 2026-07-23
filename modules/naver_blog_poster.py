@@ -78,10 +78,13 @@ def _login(page, log_callback=None) -> None:
     page.goto(LOGIN_URL, wait_until="domcontentloaded")
     page.wait_for_selector("#id", timeout=15000)
 
-    # 네이버는 값이 즉시 채워지는 input.fill()을 자동화 탐지 대상으로 볼 수 있어
-    # 사람처럼 키 입력을 흉내내는 keyboard.type()을 사용
+    # 네이버는 마우스 이동 없이 값이 즉시 채워지는 것도 자동화 신호로 볼 수 있어
+    # 필드 이동 전 마우스를 움직이고, 입력도 사람처럼 keyboard.type()으로 흉내냄
+    page.mouse.move(200, 200)
+    page.mouse.move(400, 320, steps=8)
     page.locator("#id").click()
     page.keyboard.type(naver_id, delay=80)
+    page.mouse.move(420, 380, steps=5)
     page.locator("#pw").click()
     page.keyboard.type(naver_pw, delay=80)
 
@@ -101,16 +104,14 @@ def _login(page, log_callback=None) -> None:
     page.wait_for_load_state("networkidle", timeout=15000)
 
     if "nidlogin" in page.url:
-        hint = ""
         try:
-            visible_err = page.locator(".form_message.error:visible, [role='alert']:visible").first
-            if visible_err.count():
-                hint = visible_err.inner_text().strip()
+            body_text = page.inner_text("body")
+            snippet = " / ".join(line.strip() for line in body_text.splitlines() if line.strip())[:600]
         except Exception:
-            pass
-        detail = f" 화면 메시지: {hint!r}" if hint else " (화면에 표시된 오류 메시지 없음)"
+            snippet = ""
+        detail = f" 현재 화면 텍스트: {snippet!r}" if snippet else " (화면 텍스트를 읽지 못함)"
         raise RuntimeError(
-            f"네이버 자동 로그인 실패 (캡차/2단계 인증/자동화 탐지로 추정).{detail} "
+            f"네이버 자동 로그인 실패 (캡차/2단계 인증/자동화 탐지로 추정). url={page.url}{detail} "
             "터미널에서 `python naver_setup.py`를 실행해 수동으로 로그인 후 다시 시도하세요."
         )
 
