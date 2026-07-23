@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# 일부 윈도우 콘솔(cp949 등)은 이모지를 출력하지 못해 UnicodeEncodeError로 죽으므로 강제 UTF-8 처리
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 SESSION_PATH = Path("naver_session.json")
 ERROR_DIR = Path("naver_errors")

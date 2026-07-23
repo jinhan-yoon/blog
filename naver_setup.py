@@ -10,6 +10,11 @@
 from __future__ import annotations
 
 import sys
+
+# 일부 윈도우 콘솔(cp949 등)은 이모지를 출력하지 못해 UnicodeEncodeError로 죽으므로 강제 UTF-8 처리
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
