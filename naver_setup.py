@@ -1,43 +1,63 @@
-"""네이버 블로그 최초 1회 수동 로그인 → naver_session.json 저장
+"""네이버 블로그 로그인 세션 저장 → naver_session.json
 
 사용법:
-    python naver_setup.py
+    python naver_setup.py              # 브라우저 창을 직접 보고 수동 로그인 (GUI 환경 필요)
+    python naver_setup.py --headless   # NAVER_ID/NAVER_PW로 자동 로그인 시도 (GUI 없는 서버용)
 
-브라우저 창이 열리면 직접 로그인(캡차·2단계 인증 포함)한 뒤,
-블로그 홈으로 이동할 때까지 기다리면 세션이 자동 저장됩니다.
+--headless 모드는 캡차·2단계 인증이 뜨면 실패합니다. 그 경우 GUI가 있는 PC에서
+플래그 없이 실행해 수동으로 로그인한 뒤, 생성된 naver_session.json을 서버로 옮기세요.
 """
 from __future__ import annotations
 
-from pathlib import Path
+import sys
+from datetime import datetime
 from playwright.sync_api import sync_playwright
 
-SESSION_PATH = Path("naver_session.json")
-LOGIN_URL = "https://nid.naver.com/nidlogin.login"
+from modules.naver_blog_poster import _login, LOGIN_URL, SESSION_PATH, ERROR_DIR
+
+
+def _manual_login(page) -> None:
+    page.goto(LOGIN_URL, wait_until="domcontentloaded")
+    print("브라우저에서 네이버 계정으로 로그인하세요 (캡차/2단계 인증 포함).")
+    print("로그인이 완료되면 자동으로 감지해 세션을 저장합니다... (최대 5분 대기)")
+    try:
+        page.wait_for_url(lambda url: "nidlogin" not in url, timeout=300_000)
+    except Exception:
+        raise RuntimeError("5분 내에 로그인이 감지되지 않았습니다. 다시 실행해주세요.")
+    page.wait_for_timeout(2000)
 
 
 def main() -> None:
+    headless = "--headless" in sys.argv[1:]
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=headless)
         context = browser.new_context(viewport={"width": 1400, "height": 1000}, locale="ko-KR")
         page = context.new_page()
-        page.goto(LOGIN_URL, wait_until="domcontentloaded")
-
-        print("브라우저에서 네이버 계정으로 로그인하세요 (캡차/2단계 인증 포함).")
-        print("로그인이 완료되면 자동으로 감지해 세션을 저장합니다... (최대 5분 대기)")
 
         try:
-            page.wait_for_url(lambda url: "nidlogin" not in url, timeout=300_000)
-        except Exception:
-            print("⏱️ 5분 내에 로그인이 감지되지 않았습니다. 다시 실행해주세요.")
+            if headless:
+                _login(page)
+            else:
+                _manual_login(page)
+
+            context.storage_state(path=str(SESSION_PATH))
+            print(f"✅ 세션 저장 완료: {SESSION_PATH.resolve()}")
+
+        except Exception as e:
+            print(f"❌ {e}")
+            if headless:
+                ERROR_DIR.mkdir(exist_ok=True)
+                shot = ERROR_DIR / f"setup_error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                try:
+                    page.screenshot(path=str(shot), full_page=True)
+                    print(f"오류 스크린샷 저장: {shot}")
+                except Exception:
+                    pass
+                print("캡차·2단계 인증이 원인일 수 있습니다. GUI 환경에서 `python naver_setup.py`(플래그 없이)로 재시도하세요.")
+
+        finally:
             browser.close()
-            return
-
-        # 로그인 직후 리다이렉트가 안정될 시간을 잠깐 대기
-        page.wait_for_timeout(2000)
-        context.storage_state(path=str(SESSION_PATH))
-        print(f"✅ 세션 저장 완료: {SESSION_PATH.resolve()}")
-
-        browser.close()
 
 
 if __name__ == "__main__":
