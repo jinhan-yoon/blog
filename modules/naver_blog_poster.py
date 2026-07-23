@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import time
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -14,6 +13,15 @@ ERROR_DIR = Path("naver_errors")
 
 LOGIN_URL = "https://nid.naver.com/nidlogin.login"
 WRITE_URL = "https://blog.naver.com/{blog_id}?Redirect=Write&"
+
+# 헤드리스 Chromium을 그대로 쓰면 navigator.webdriver 등으로 자동화가 감지돼
+# 네이버가 로그인을 거부할 수 있어, launch 인자·UA·초기화 스크립트로 흔적을 지움
+LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled"]
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+_STEALTH_INIT_SCRIPT = "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
 
 # Smart Editor ONE의 클래스명은 네이버가 예고 없이 변경하므로, 발행이 실패하면
 # 아래 셀렉터들을 최신 DOM 구조에 맞춰 갱신해야 할 수 있습니다.
@@ -41,6 +49,19 @@ def check_session_status() -> dict:
         "blog_id": bool(blog_id),
         "ready": has_session and bool(naver_id and naver_pw) and bool(blog_id),
     }
+
+
+def new_context(browser, storage_state: str | None = None):
+    """자동화 탐지를 피하기 위한 설정이 적용된 브라우저 컨텍스트 생성"""
+    context = browser.new_context(
+        storage_state=storage_state,
+        viewport={"width": 1400, "height": 1000},
+        locale="ko-KR",
+        timezone_id="Asia/Seoul",
+        user_agent=_USER_AGENT,
+    )
+    context.add_init_script(_STEALTH_INIT_SCRIPT)
+    return context
 
 
 # ── 로그인 ────────────────────────────────────────────────────────────────
@@ -80,8 +101,16 @@ def _login(page, log_callback=None) -> None:
     page.wait_for_load_state("networkidle", timeout=15000)
 
     if "nidlogin" in page.url:
+        hint = ""
+        try:
+            visible_err = page.locator(".form_message.error:visible, [role='alert']:visible").first
+            if visible_err.count():
+                hint = visible_err.inner_text().strip()
+        except Exception:
+            pass
+        detail = f" 화면 메시지: {hint!r}" if hint else " (화면에 표시된 오류 메시지 없음)"
         raise RuntimeError(
-            "네이버 자동 로그인 실패 (캡차 또는 2단계 인증으로 추정됩니다). "
+            f"네이버 자동 로그인 실패 (캡차/2단계 인증/자동화 탐지로 추정).{detail} "
             "터미널에서 `python naver_setup.py`를 실행해 수동으로 로그인 후 다시 시도하세요."
         )
 
@@ -121,12 +150,8 @@ def publish_post(
         return {"url": None, "error": "NAVER_BLOG_ID가 설정되지 않았습니다.", "screenshot": None}
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        context = browser.new_context(
-            storage_state=str(SESSION_PATH) if SESSION_PATH.exists() else None,
-            viewport={"width": 1400, "height": 1000},
-            locale="ko-KR",
-        )
+        browser = p.chromium.launch(headless=headless, args=LAUNCH_ARGS)
+        context = new_context(browser, storage_state=str(SESSION_PATH) if SESSION_PATH.exists() else None)
         page = context.new_page()
         page.on("dialog", lambda d: d.dismiss())
 

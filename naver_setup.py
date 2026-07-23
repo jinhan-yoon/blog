@@ -13,7 +13,7 @@ import sys
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
-from modules.naver_blog_poster import _login, LOGIN_URL, SESSION_PATH, ERROR_DIR
+from modules.naver_blog_poster import _login, LOGIN_URL, SESSION_PATH, ERROR_DIR, LAUNCH_ARGS, new_context
 
 
 def _manual_login(page) -> None:
@@ -31,8 +31,8 @@ def main() -> None:
     headless = "--headless" in sys.argv[1:]
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        context = browser.new_context(viewport={"width": 1400, "height": 1000}, locale="ko-KR")
+        browser = p.chromium.launch(headless=headless, args=LAUNCH_ARGS)
+        context = new_context(browser)
         page = context.new_page()
 
         try:
