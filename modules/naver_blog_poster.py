@@ -64,10 +64,18 @@ def _login(page, log_callback=None) -> None:
     page.locator("#pw").click()
     page.keyboard.type(naver_pw, delay=80)
 
-    login_btn = page.locator("#log\\.login")
-    if login_btn.count() == 0:
-        login_btn = page.locator("button:has-text('로그인')")
-    login_btn.first.click()
+    # 네이버 로그인 폼은 반응형 레이아웃별로 column/row 두 벌의 버튼을 동시에 DOM에 두고
+    # CSS로 하나만 보여주므로, id로 특정한 뒤 실제로 보이는 쪽을 찾아 클릭해야 함
+    # (텍스트 매칭은 "패스키 로그인" 버튼도 "로그인"을 포함해 오클릭될 수 있음)
+    login_btn = None
+    for sel in ("#loginBtn_column", "#loginBtn_row", "#log\\.login"):
+        candidate = page.locator(sel)
+        if candidate.count() and candidate.first.is_visible():
+            login_btn = candidate.first
+            break
+    if login_btn is None:
+        login_btn = page.locator("button.btn_done:has-text('로그인')").first
+    login_btn.click()
 
     page.wait_for_load_state("networkidle", timeout=15000)
 
