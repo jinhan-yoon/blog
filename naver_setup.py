@@ -54,7 +54,7 @@ def main() -> None:
                     print(f"오류 스크린샷 저장: {shot}")
                 except Exception:
                     pass
-                print("캡차·2단계 인증이 원인일 수 있습니다. GUI 환경에서 `python naver_setup.py`(플래그 없이)로 재시도하세요.")
+                print("GUI 환경에서 `python naver_setup.py`(플래그 없이)로 재시도해 직접 로그인해주세요.")
 
         finally:
             browser.close()

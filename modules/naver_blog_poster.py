@@ -106,14 +106,19 @@ def _login(page, log_callback=None) -> None:
     if "nidlogin" in page.url:
         try:
             body_text = page.inner_text("body")
-            snippet = " / ".join(line.strip() for line in body_text.splitlines() if line.strip())[:600]
+            snippet = " / ".join(line.strip() for line in body_text.splitlines() if line.strip())[:400]
         except Exception:
             snippet = ""
-        detail = f" 현재 화면 텍스트: {snippet!r}" if snippet else " (화면 텍스트를 읽지 못함)"
-        raise RuntimeError(
-            f"네이버 자동 로그인 실패 (캡차/2단계 인증/자동화 탐지로 추정). url={page.url}{detail} "
-            "터미널에서 `python naver_setup.py`를 실행해 수동으로 로그인 후 다시 시도하세요."
-        )
+
+        if any(k in snippet for k in ("캡차", "영수증", "추가 확인", "additional verification")):
+            reason = "캡차/추가 인증 화면"
+        else:
+            reason = "원인 불명 (로그인 페이지에 그대로 머묾)"
+
+        msg = f"네이버 자동 로그인 실패 — {reason}"
+        if snippet:
+            msg += f". 화면 내용: {snippet!r}"
+        raise RuntimeError(msg)
 
     _log(log_callback, "✅ 네이버 로그인 성공")
 
