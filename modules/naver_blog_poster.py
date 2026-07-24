@@ -39,10 +39,11 @@ SEL_TITLE = ".se-title-text .se-text-paragraph"
 # .first가 제목 문단을 다시 잡아버릴 수 있어, se-title-text 하위가 아닌 것만 선택
 SEL_BODY = "xpath=//*[contains(concat(' ', normalize-space(@class), ' '), ' se-text-paragraph ')][not(ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' se-title-text ')])]"
 # has-text는 부분일치라 "예약발행" 버튼도 걸려 잘못 클릭될 수 있어, 텍스트가 정확히
-# "발행"인 버튼만 선택 (:text-is는 공백 트리밍 후 완전일치)
-SEL_PUBLISH_OPEN = "button:text-is('발행')"
+# "발행"인 요소만 선택 (:text-is는 공백 트리밍 후 완전일치). button 태그로 한정하지 않는 이유는
+# 실제 발행 요소가 button이 아닌 div/a일 수 있어서 (확인 전까지는 태그 제한을 두지 않음)
+SEL_PUBLISH_OPEN = "*:text-is('발행')"
 SEL_TAG_INPUT = "#tag-input"
-SEL_PUBLISH_CONFIRM = "button:text-is('발행')"
+SEL_PUBLISH_CONFIRM = "*:text-is('발행')"
 
 
 # ── 상태 확인 ──────────────────────────────────────────────────────────────
@@ -289,17 +290,22 @@ def _html_to_text_blocks(content_html: str) -> list[str]:
     """
     HTML 본문을 문단 단위 평문으로 변환.
     Smart Editor는 합성 ClipboardEvent를 통한 붙여넣기를 실제로 반영하지 않아
-    (paste 이벤트는 발생해도 콘텐츠가 삽입되지 않음), 실제 키 입력을 흉내내는
-    keyboard.type()으로 문단을 하나씩 입력하는 방식을 사용한다.
+    (paste 이벤트는 발생해도 콘텐츠가 삽입되지 않음), 실제 입력을 흉내내는
+    insert_text()로 문단을 하나씩 입력하는 방식을 사용한다.
     이 과정에서 굵게/제목 등 서식과 <img>는 반영되지 않는다.
+
+    본문에 "~~단어~~" 같은 물결표 강조가 있으면(캐주얼한 한국어 블로그 문체에서 흔함)
+    Smart Editor가 이를 취소선 마크다운 단축 서식으로 오인식해 실제로 취소선이 적용되므로,
+    전각 물결(～)로 치환해 원래 어감은 유지하면서 오인식을 막는다.
     """
     soup = BeautifulSoup(content_html, "html.parser")
     blocks = [
-        text for tag in soup.find_all(["p", "h1", "h2", "h3", "h4", "li", "blockquote"])
+        text.replace("~", "～")
+        for tag in soup.find_all(["p", "h1", "h2", "h3", "h4", "li", "blockquote"])
         if (text := tag.get_text(" ", strip=True))
     ]
     if not blocks:
-        text = soup.get_text(" ", strip=True)
+        text = soup.get_text(" ", strip=True).replace("~", "～")
         if text:
             blocks = [text]
     return blocks
