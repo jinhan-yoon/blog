@@ -195,6 +195,10 @@ def publish_post(
             _dismiss_popups(frame)
             body_locator = frame.locator(SEL_BODY).first
             body_locator.click()
+            # 본문 최초 커서 위치(placeholder 문단)에 취소선 서식이 걸려있는 경우가 있어,
+            # 타이핑 시작 전에 취소선 토글 버튼을 한 번 눌러 꺼둔다. DOM에서 <strike>를
+            # 직접 제거하는 방식은 발행 시 스마트에디터 내부 모델이 다시 덮어써서 무효했음
+            _ensure_strike_off(frame)
             for block in _html_to_blocks(content_html):
                 if block["type"] == "image":
                     _insert_image(frame, page, block["src"], log_callback)
@@ -205,22 +209,6 @@ def publish_post(
                     page.keyboard.insert_text(block["text"])
                     page.keyboard.press("Enter")
             page.wait_for_timeout(800)
-
-            # 본문 placeholder 문단이 <strike>로 감싸져 있는 경우가 있어, 거기 이어서
-            # 타이핑하면 실제 발행된 글에도 전부 취소선이 적용되는 문제가 있었음.
-            # 원인을 없애는 대신, 발행 직전 본문 전체에서 <strike> 래핑을 강제로 제거한다.
-            try:
-                frame.locator(".se-main-container").first.evaluate(
-                    """(root) => {
-                        root.querySelectorAll('strike, s, del').forEach((el) => {
-                            const parent = el.parentNode;
-                            while (el.firstChild) parent.insertBefore(el.firstChild, el);
-                            parent.removeChild(el);
-                        });
-                    }"""
-                )
-            except Exception:
-                pass
 
             _log(log_callback, "발행 설정 중...")
             # "발행" 버튼과 그 이후 설정 레이어는 iframe#mainFrame 밖 상위 페이지 헤더에 있는
@@ -285,6 +273,16 @@ def _click_last(page, frame, sel: str, timeout: int = 8000) -> None:
         page.locator(sel).last.click()
     except Exception:
         frame.locator(sel).last.click()
+
+
+def _ensure_strike_off(frame) -> None:
+    """본문 placeholder 문단에 취소선 서식이 걸려있는 경우가 있어, 토글 버튼을 찾아 한 번 눌러 끈다"""
+    try:
+        btn = frame.locator("[title*='취소선'], [aria-label*='취소선']").first
+        btn.wait_for(state="visible", timeout=1500)
+        btn.click()
+    except Exception:
+        pass
 
 
 def _dismiss_popups(frame) -> None:
