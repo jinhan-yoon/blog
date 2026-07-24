@@ -34,7 +34,9 @@ _STEALTH_INIT_SCRIPT = "Object.defineProperty(navigator, 'webdriver', { get: () 
 SEL_POPUP_CANCEL = ".se-popup-button-cancel, button:has-text('취소')"
 SEL_HELP_CLOSE = ".se-help-panel-close-button"
 SEL_TITLE = ".se-title-text .se-text-paragraph"
-SEL_BODY = ".se-component-content .se-text-paragraph"
+# .se-component-content .se-text-paragraph만으로는 제목 영역도 같은 구조를 써서
+# .first가 제목 문단을 다시 잡아버릴 수 있어, se-title-text 하위가 아닌 것만 선택
+SEL_BODY = "xpath=//*[contains(concat(' ', normalize-space(@class), ' '), ' se-text-paragraph ')][not(ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' se-title-text ')])]"
 SEL_PUBLISH_OPEN = "button.publish_btn_area, button:has-text('발행')"
 SEL_TAG_INPUT = "#tag-input"
 SEL_PUBLISH_CONFIRM = ".layer_btn button:has-text('발행'), button.btn_publish:has-text('발행')"
@@ -252,6 +254,7 @@ def _paste_html(locator, content_html: str) -> None:
         """(el, html) => {
             const dt = new DataTransfer();
             dt.setData('text/html', html);
+            dt.setData('text/plain', html.replace(/<[^>]+>/g, ' '));
             const evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
             el.dispatchEvent(evt);
         }""",
