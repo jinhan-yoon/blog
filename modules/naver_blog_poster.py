@@ -180,10 +180,12 @@ def publish_post(
             _dismiss_popups(frame)
 
             _log(log_callback, "제목 입력 중...")
+            _dismiss_popups(frame)
             frame.locator(SEL_TITLE).first.click()
             page.keyboard.type(title, delay=10)
 
             _log(log_callback, "본문 삽입 중...")
+            _dismiss_popups(frame)
             frame.locator(SEL_BODY).first.click()
             _paste_html(frame, content_html)
             page.wait_for_timeout(1500)
@@ -223,11 +225,17 @@ def publish_post(
 
 
 def _dismiss_popups(frame) -> None:
-    """이어쓰기 확인창·도움말 패널 등 글쓰기 진입 시 뜨는 팝업 정리"""
-    for sel in (SEL_POPUP_CANCEL, SEL_HELP_CLOSE):
+    """이어쓰기 확인창·도움말 패널·일반 알림(se-popup-alert) 등 화면을 가리는 팝업 정리"""
+    for sel in (
+        SEL_POPUP_CANCEL,
+        SEL_HELP_CLOSE,
+        ".se-popup-alert-confirm button",
+        ".se-popup-alert button",
+        ".se-popup-dim ~ * button",
+    ):
         try:
             btn = frame.locator(sel).first
-            if btn.is_visible(timeout=1500):
+            if btn.is_visible(timeout=1000):
                 btn.click()
         except Exception:
             pass
