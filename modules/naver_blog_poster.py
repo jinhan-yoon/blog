@@ -238,8 +238,10 @@ def _dismiss_popups(frame) -> None:
     ):
         try:
             btn = frame.locator(sel).first
-            if btn.is_visible(timeout=1000):
-                btn.click()
+            # is_visible()은 timeout을 줘도 기다리지 않고 즉시 판정하므로,
+            # 팝업이 늦게 뜨는 경우를 잡으려면 wait_for()로 실제로 기다려야 함
+            btn.wait_for(state="visible", timeout=1200)
+            btn.click()
         except Exception:
             pass
 
