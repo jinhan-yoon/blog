@@ -194,7 +194,10 @@ def publish_post(
             body_locator = frame.locator(SEL_BODY).first
             body_locator.click()
             for block in _html_to_text_blocks(content_html):
-                page.keyboard.type(block, delay=3)
+                # keyboard.type()은 한 글자씩 눌러 "~~단어~~" 같은 패턴이 스마트에디터의
+                # 마크다운 단축 서식(취소선 등)으로 오인식됨 — insert_text는 완성된 문자열을
+                # 한 번에 넣어 단축 서식 감지를 우회한다
+                page.keyboard.insert_text(block)
                 page.keyboard.press("Enter")
             page.wait_for_timeout(800)
 
