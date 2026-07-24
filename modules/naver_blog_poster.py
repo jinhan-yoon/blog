@@ -5,6 +5,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
@@ -155,8 +156,8 @@ def publish_post(
     """
     네이버 블로그에 포스팅 발행 (Playwright + Smart Editor ONE UI 자동화).
 
-    본문 HTML은 문단 텍스트만 추출해 실제 키 입력처럼 타이핑해 넣습니다.
-    굵게/제목 등 서식과 이미지(<img>)는 반영되지 않는 평문 발행입니다.
+    본문 HTML의 문단 텍스트는 실제 입력처럼 타이핑해 넣고, <img> 태그는 원래 위치 그대로
+    다운로드해 네이버 사진 업로드 기능으로 삽입합니다. 굵게/제목 등 세부 서식은 반영되지 않습니다.
 
     Returns:
         {"url": str|None, "error": str|None, "screenshot": str|None}
@@ -194,12 +195,15 @@ def publish_post(
             _dismiss_popups(frame)
             body_locator = frame.locator(SEL_BODY).first
             body_locator.click()
-            for block in _html_to_text_blocks(content_html):
-                # keyboard.type()은 한 글자씩 눌러 "~~단어~~" 같은 패턴이 스마트에디터의
-                # 마크다운 단축 서식(취소선 등)으로 오인식됨 — insert_text는 완성된 문자열을
-                # 한 번에 넣어 단축 서식 감지를 우회한다
-                page.keyboard.insert_text(block)
-                page.keyboard.press("Enter")
+            for block in _html_to_blocks(content_html):
+                if block["type"] == "image":
+                    _insert_image(frame, page, block["src"], log_callback)
+                else:
+                    # keyboard.type()은 한 글자씩 눌러 "~~단어~~" 같은 패턴이 스마트에디터의
+                    # 마크다운 단축 서식(취소선 등)으로 오인식됨 — insert_text는 완성된 문자열을
+                    # 한 번에 넣어 단축 서식 감지를 우회한다
+                    page.keyboard.insert_text(block["text"])
+                    page.keyboard.press("Enter")
             page.wait_for_timeout(800)
 
             _log(log_callback, "발행 설정 중...")
@@ -286,29 +290,69 @@ def _dismiss_popups(frame) -> None:
             pass
 
 
-def _html_to_text_blocks(content_html: str) -> list[str]:
+def _html_to_blocks(content_html: str) -> list[dict]:
     """
-    HTML 본문을 문단 단위 평문으로 변환.
-    Smart Editor는 합성 ClipboardEvent를 통한 붙여넣기를 실제로 반영하지 않아
-    (paste 이벤트는 발생해도 콘텐츠가 삽입되지 않음), 실제 입력을 흉내내는
-    insert_text()로 문단을 하나씩 입력하는 방식을 사용한다.
-    이 과정에서 굵게/제목 등 서식과 <img>는 반영되지 않는다.
+    HTML 본문을 원래 순서 그대로 텍스트/이미지 블록 리스트로 변환.
+    {"type": "text", "text": str} 또는 {"type": "image", "src": str}
+
+    본문은 Smart Editor가 합성 ClipboardEvent 붙여넣기를 실제로 반영하지 않아
+    (이벤트는 발생해도 콘텐츠 미삽입), 실제 입력을 흉내내는 insert_text()로 문단을
+    하나씩 입력한다. 굵게/제목 등 세부 서식은 반영되지 않는다.
 
     본문에 "~~단어~~" 같은 물결표 강조가 있으면(캐주얼한 한국어 블로그 문체에서 흔함)
     Smart Editor가 이를 취소선 마크다운 단축 서식으로 오인식해 실제로 취소선이 적용되므로,
     전각 물결(～)로 치환해 원래 어감은 유지하면서 오인식을 막는다.
     """
     soup = BeautifulSoup(content_html, "html.parser")
-    blocks = [
-        text.replace("~", "～")
-        for tag in soup.find_all(["p", "h1", "h2", "h3", "h4", "li", "blockquote"])
-        if (text := tag.get_text(" ", strip=True))
-    ]
+    blocks: list[dict] = []
+    for tag in soup.find_all(["p", "h1", "h2", "h3", "h4", "li", "blockquote", "img"]):
+        if tag.name == "img":
+            src = tag.get("src")
+            if src:
+                blocks.append({"type": "image", "src": src})
+        else:
+            text = tag.get_text(" ", strip=True)
+            if text:
+                blocks.append({"type": "text", "text": text.replace("~", "～")})
+
     if not blocks:
         text = soup.get_text(" ", strip=True).replace("~", "～")
         if text:
-            blocks = [text]
+            blocks = [{"type": "text", "text": text}]
     return blocks
+
+
+def _insert_image(frame, page, image_url: str, log_callback=None) -> None:
+    """이미지 URL을 다운로드해 Smart Editor의 사진 업로드 input(type=file)으로 삽입"""
+    try:
+        resp = requests.get(image_url, timeout=30)
+        resp.raise_for_status()
+        image_bytes = resp.content
+    except Exception as e:
+        _log(log_callback, f"⚠️ 이미지 다운로드 실패, 건너뜀: {e}")
+        return
+
+    try:
+        # "사진" 툴바 버튼을 먼저 눌러야 업로드 input이 현재 커서 위치를 인식하는 구조일 수 있어 시도
+        photo_btn = frame.locator(":text-is('사진')").first
+        photo_btn.wait_for(state="visible", timeout=2000)
+        photo_btn.click()
+    except Exception:
+        pass
+
+    try:
+        file_input = frame.locator("input[type='file']").first
+        file_input.set_input_files({
+            "name": "image.jpg",
+            "mimeType": "image/jpeg",
+            "buffer": image_bytes,
+        })
+        page.wait_for_timeout(2500)
+        page.keyboard.press("End")
+        page.keyboard.press("Enter")
+        _log(log_callback, "🖼️ 이미지 삽입 완료")
+    except Exception as e:
+        _log(log_callback, f"⚠️ 이미지 삽입 실패, 건너뜀: {e}")
 
 
 def _log(log_callback, msg: str) -> None:
