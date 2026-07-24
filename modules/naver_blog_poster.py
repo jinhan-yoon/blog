@@ -31,7 +31,7 @@ _STEALTH_INIT_SCRIPT = "Object.defineProperty(navigator, 'webdriver', { get: () 
 
 # Smart Editor ONE의 클래스명은 네이버가 예고 없이 변경하므로, 발행이 실패하면
 # 아래 셀렉터들을 최신 DOM 구조에 맞춰 갱신해야 할 수 있습니다.
-SEL_POPUP_CANCEL = ".se-popup-button-cancel"
+SEL_POPUP_CANCEL = ".se-popup-button-cancel, button:has-text('취소')"
 SEL_HELP_CLOSE = ".se-help-panel-close-button"
 SEL_TITLE = ".se-title-text .se-text-paragraph"
 SEL_BODY = ".se-component-content .se-text-paragraph"
@@ -186,8 +186,9 @@ def publish_post(
 
             _log(log_callback, "본문 삽입 중...")
             _dismiss_popups(frame)
-            frame.locator(SEL_BODY).first.click()
-            _paste_html(frame, content_html)
+            body_locator = frame.locator(SEL_BODY).first
+            body_locator.click()
+            _paste_html(body_locator, content_html)
             page.wait_for_timeout(1500)
 
             _log(log_callback, "발행 설정 중...")
@@ -241,9 +242,13 @@ def _dismiss_popups(frame) -> None:
             pass
 
 
-def _paste_html(frame, content_html: str) -> None:
-    """포커스된 에디터 영역에 HTML을 클립보드 붙여넣기 이벤트로 주입 (raw HTML 입력 API가 없어 이 방식 사용)"""
-    frame.locator(":focus").evaluate(
+def _paste_html(locator, content_html: str) -> None:
+    """
+    본문 영역에 HTML을 클립보드 붙여넣기 이벤트로 주입 (raw HTML 입력 API가 없어 이 방식 사용).
+    :focus로 포커스된 엘리먼트를 다시 찾지 않고, 클릭에 사용한 로케이터를 그대로 evaluate 대상으로 써서
+    포커스가 다른 자식 엘리먼트로 옮겨가 엉뚱한 곳에 붙여넣기 되는 문제를 막는다.
+    """
+    locator.evaluate(
         """(el, html) => {
             const dt = new DataTransfer();
             dt.setData('text/html', html);
