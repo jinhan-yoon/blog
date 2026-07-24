@@ -191,11 +191,11 @@ def publish_post(
             _log(log_callback, "본문 삽입 중...")
             _dismiss_popups(frame)
             # 본문 placeholder 문단을 직접 클릭해서 거기 이어 타이핑하면 이상하게
-            # 취소선 서식이 계속 남아있었음 (DOM 제거·토글 버튼 클릭 둘 다 효과 없었음).
-            # 대신 제목에서 Enter로 자연스럽게 본문으로 넘어가는 방식으로 변경 —
-            # placeholder를 클릭한 적이 없으므로 그 잔여 서식을 아예 물려받지 않음
+            # 취소선 서식이 계속 남아있었음. 제목에서 Enter로 자연스럽게 본문으로 넘어가도
+            # 동일하게 발생해, 개발자도구로 실제 원인을 확인함: 실제 취소선 토글 버튼은
+            # 텍스트를 "선택"했을 때만 나타나는 속성 툴바(.se-strikethrough-toolbar-button)라
+            # 커서만 있는 상태에서 확인/클릭해봐야 소용이 없었던 것 — 전체 선택 후 꺼야 함
             page.keyboard.press("Enter")
-            _clear_native_strike(page)
             for block in _html_to_blocks(content_html):
                 if block["type"] == "image":
                     _insert_image(frame, page, block["src"], log_callback)
@@ -205,8 +205,8 @@ def publish_post(
                     # 한 번에 넣어 단축 서식 감지를 우회한다
                     page.keyboard.insert_text(block["text"])
                     page.keyboard.press("Enter")
-                    _clear_native_strike(page)
             page.wait_for_timeout(800)
+            _clear_strike_on_selection(frame, page)
 
             _log(log_callback, "발행 설정 중...")
             # "발행" 버튼과 그 이후 설정 레이어는 iframe#mainFrame 밖 상위 페이지 헤더에 있는
@@ -245,24 +245,21 @@ def publish_post(
             browser.close()
 
 
-def _clear_native_strike(page) -> None:
+def _clear_strike_on_selection(frame, page) -> None:
     """
-    현재 커서 위치의 취소선 상태를 브라우저 네이티브 API로 확인 후 꺼둔다.
-    DOM에서 <strike>를 직접 지우는 방식은 스마트에디터가 발행 시 내부 모델 기준으로
-    다시 써버려 무효했으므로, 에디터도 결국 참조하는 네이티브 contenteditable 서식
-    상태(document.queryCommandState/execCommand)를 직접 토글한다.
+    본문 전체를 선택한 뒤, 개발자도구로 확인한 실제 취소선 토글 버튼
+    (.se-strikethrough-toolbar-button, data-name="strikethrough")을 클릭해 끈다.
+    이 버튼은 텍스트가 "선택"된 상태에서만 나타나는 속성 툴바 소속이라,
+    커서만 있는 상태에서는 확인·클릭이 애초에 불가능했다.
     """
     try:
-        mainframe = next((f for f in page.frames if f.name == "mainFrame"), None)
-        if mainframe is None:
-            return
-        mainframe.evaluate(
-            """() => {
-                if (document.queryCommandState('strikeThrough')) {
-                    document.execCommand('strikeThrough');
-                }
-            }"""
-        )
+        page.keyboard.press("Control+a")
+        btn = frame.locator(".se-strikethrough-toolbar-button").first
+        btn.wait_for(state="visible", timeout=2000)
+        pressed = btn.get_attribute("aria-pressed")
+        is_active = pressed == "true" or "active" in (btn.get_attribute("class") or "")
+        if is_active or pressed is None:
+            btn.click()
     except Exception:
         pass
 
