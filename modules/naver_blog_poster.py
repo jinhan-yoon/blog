@@ -37,9 +37,11 @@ SEL_TITLE = ".se-title-text .se-text-paragraph"
 # .se-component-content .se-text-paragraph만으로는 제목 영역도 같은 구조를 써서
 # .first가 제목 문단을 다시 잡아버릴 수 있어, se-title-text 하위가 아닌 것만 선택
 SEL_BODY = "xpath=//*[contains(concat(' ', normalize-space(@class), ' '), ' se-text-paragraph ')][not(ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' se-title-text ')])]"
-SEL_PUBLISH_OPEN = "button.publish_btn_area, button:has-text('발행')"
+# has-text는 부분일치라 "예약발행" 버튼도 걸려 잘못 클릭될 수 있어, 텍스트가 정확히
+# "발행"인 버튼만 선택 (:text-is는 공백 트리밍 후 완전일치)
+SEL_PUBLISH_OPEN = "button:text-is('발행')"
 SEL_TAG_INPUT = "#tag-input"
-SEL_PUBLISH_CONFIRM = ".layer_btn button:has-text('발행'), button.btn_publish:has-text('발행')"
+SEL_PUBLISH_CONFIRM = "button:text-is('발행')"
 
 
 # ── 상태 확인 ──────────────────────────────────────────────────────────────
@@ -204,7 +206,9 @@ def publish_post(
                 page.keyboard.press("Enter")
 
             _log(log_callback, "발행 중...")
-            frame.locator(SEL_PUBLISH_CONFIRM).first.click()
+            # 발행 설정 레이어(팝업)는 보통 DOM에 나중에 추가되므로, 같은 "발행" 버튼 중
+            # 마지막 것이 레이어 안의 최종 확인 버튼일 가능성이 높음 (.first는 상단 버튼 재클릭 위험)
+            frame.locator(SEL_PUBLISH_CONFIRM).last.click()
             page.wait_for_url(f"**/{blog_id}/**", timeout=20000)
 
             final_url = page.url
