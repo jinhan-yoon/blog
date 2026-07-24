@@ -61,7 +61,9 @@ jobs:
           fi
           venv/bin/pip install -q --upgrade pip
           venv/bin/pip install -q -r requirements.txt
-          venv/bin/playwright install chromium || echo "⚠️ playwright chromium 설치 실패 — 네이버 발행 기능에 영향 있을 수 있음, 서버에서 수동 확인 필요"
+          # blog-streamlit 서비스가 root로 실행되므로(systemd 유닛에 User= 없음),
+          # Playwright 브라우저 캐시도 root의 홈(/root/.cache/ms-playwright)에 설치해야 함
+          sudo venv/bin/playwright install chromium || echo "⚠️ playwright chromium 설치 실패 — 네이버 발행 기능에 영향 있을 수 있음, 서버에서 수동 확인 필요"
 
       - name: Register systemd service
         run: |
