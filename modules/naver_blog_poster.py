@@ -199,11 +199,12 @@ def publish_post(
             page.wait_for_timeout(800)
 
             _log(log_callback, "발행 설정 중...")
-            frame.locator(SEL_PUBLISH_OPEN).first.click()
-            frame.locator(SEL_TAG_INPUT).wait_for(timeout=8000)
+            # "발행" 버튼과 그 이후 설정 레이어는 iframe#mainFrame 밖 상위 페이지 헤더에 있는
+            # 것으로 보이나, 확실치 않아 상위 페이지 우선 시도 후 iframe 안도 시도
+            _click_first(page, frame, SEL_PUBLISH_OPEN)
+            tag_input = _locate_first(page, frame, SEL_TAG_INPUT, timeout=8000)
 
             for tag in (tags or [])[:10]:
-                tag_input = frame.locator(SEL_TAG_INPUT)
                 tag_input.click()
                 page.keyboard.type(tag, delay=30)
                 page.keyboard.press("Enter")
@@ -211,7 +212,7 @@ def publish_post(
             _log(log_callback, "발행 중...")
             # 발행 설정 레이어(팝업)는 보통 DOM에 나중에 추가되므로, 같은 "발행" 버튼 중
             # 마지막 것이 레이어 안의 최종 확인 버튼일 가능성이 높음 (.first는 상단 버튼 재클릭 위험)
-            frame.locator(SEL_PUBLISH_CONFIRM).last.click()
+            _click_last(page, frame, SEL_PUBLISH_CONFIRM)
             page.wait_for_url(f"**/{blog_id}/**", timeout=20000)
 
             final_url = page.url
@@ -232,6 +233,34 @@ def publish_post(
 
         finally:
             browser.close()
+
+
+def _locate_first(page, frame, sel: str, timeout: int = 8000):
+    """상위 페이지에 먼저 있는지 보고, 없으면 iframe 안에서 첫 번째 매치를 반환"""
+    try:
+        loc = page.locator(sel).first
+        loc.wait_for(state="visible", timeout=timeout)
+        return loc
+    except Exception:
+        return frame.locator(sel).first
+
+
+def _click_first(page, frame, sel: str, timeout: int = 8000) -> None:
+    """상위 페이지에 먼저 있는지 보고, 없으면 iframe 안에서 첫 번째 매치를 클릭"""
+    try:
+        page.locator(sel).first.wait_for(state="visible", timeout=timeout)
+        page.locator(sel).first.click()
+    except Exception:
+        frame.locator(sel).first.click()
+
+
+def _click_last(page, frame, sel: str, timeout: int = 8000) -> None:
+    """상위 페이지에 먼저 있는지 보고, 없으면 iframe 안에서 마지막 매치를 클릭"""
+    try:
+        page.locator(sel).last.wait_for(state="visible", timeout=timeout)
+        page.locator(sel).last.click()
+    except Exception:
+        frame.locator(sel).last.click()
 
 
 def _dismiss_popups(frame) -> None:
