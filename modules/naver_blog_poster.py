@@ -206,6 +206,22 @@ def publish_post(
                     page.keyboard.press("Enter")
             page.wait_for_timeout(800)
 
+            # 본문 placeholder 문단이 <strike>로 감싸져 있는 경우가 있어, 거기 이어서
+            # 타이핑하면 실제 발행된 글에도 전부 취소선이 적용되는 문제가 있었음.
+            # 원인을 없애는 대신, 발행 직전 본문 전체에서 <strike> 래핑을 강제로 제거한다.
+            try:
+                frame.locator(".se-main-container").first.evaluate(
+                    """(root) => {
+                        root.querySelectorAll('strike, s, del').forEach((el) => {
+                            const parent = el.parentNode;
+                            while (el.firstChild) parent.insertBefore(el.firstChild, el);
+                            parent.removeChild(el);
+                        });
+                    }"""
+                )
+            except Exception:
+                pass
+
             _log(log_callback, "발행 설정 중...")
             # "발행" 버튼과 그 이후 설정 레이어는 iframe#mainFrame 밖 상위 페이지 헤더에 있는
             # 것으로 보이나, 확실치 않아 상위 페이지 우선 시도 후 iframe 안도 시도
