@@ -129,33 +129,14 @@ with st.sidebar:
     st.caption("Google Trends → vLLM → Blogger")
     st.divider()
 
-    # 완료 상태 계산
-    step_done = {
-        "trends":  bool(st.session_state.selected_keywords),
-        "content": bool(st.session_state.post_content_html),
-        "media":   bool(st.session_state.final_html),
-        "publish": bool(
-            st.session_state.publish_result
-            and not st.session_state.publish_result.get("error")
-        ),
-    }
     cur = st.session_state.current_page
 
     st.markdown("**📋 프로세스**")
     for page in PAGES[:4]:
         key   = page["key"]
-        done  = step_done.get(key, False)
         is_cur = key == cur
-        step_num = page["step"]
 
-        if is_cur:
-            prefix = "▶"
-        elif done:
-            prefix = "✅"
-        else:
-            prefix = str(step_num)
-
-        label = f"{prefix}  {page['icon']} {page['title']}"
+        label = f"{page['icon']} {page['title']}"
         if st.button(label, key=f"nav_{key}", use_container_width=True,
                      type="primary" if is_cur else "secondary"):
             st.session_state.current_page = key
@@ -166,7 +147,7 @@ with st.sidebar:
     for page in PAGES[4:]:
         key   = page["key"]
         is_cur = key == cur
-        label = f"{'▶  ' if is_cur else ''}{page['icon']} {page['title']}"
+        label = f"{page['icon']} {page['title']}"
         if st.button(label, key=f"nav_{key}", use_container_width=True,
                      type="primary" if is_cur else "secondary"):
             st.session_state.current_page = key
