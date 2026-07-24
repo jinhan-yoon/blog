@@ -195,6 +195,7 @@ def publish_post(
             # 대신 제목에서 Enter로 자연스럽게 본문으로 넘어가는 방식으로 변경 —
             # placeholder를 클릭한 적이 없으므로 그 잔여 서식을 아예 물려받지 않음
             page.keyboard.press("Enter")
+            _clear_native_strike(page)
             for block in _html_to_blocks(content_html):
                 if block["type"] == "image":
                     _insert_image(frame, page, block["src"], log_callback)
@@ -204,6 +205,7 @@ def publish_post(
                     # 한 번에 넣어 단축 서식 감지를 우회한다
                     page.keyboard.insert_text(block["text"])
                     page.keyboard.press("Enter")
+                    _clear_native_strike(page)
             page.wait_for_timeout(800)
 
             _log(log_callback, "발행 설정 중...")
@@ -241,6 +243,28 @@ def publish_post(
 
         finally:
             browser.close()
+
+
+def _clear_native_strike(page) -> None:
+    """
+    현재 커서 위치의 취소선 상태를 브라우저 네이티브 API로 확인 후 꺼둔다.
+    DOM에서 <strike>를 직접 지우는 방식은 스마트에디터가 발행 시 내부 모델 기준으로
+    다시 써버려 무효했으므로, 에디터도 결국 참조하는 네이티브 contenteditable 서식
+    상태(document.queryCommandState/execCommand)를 직접 토글한다.
+    """
+    try:
+        mainframe = next((f for f in page.frames if f.name == "mainFrame"), None)
+        if mainframe is None:
+            return
+        mainframe.evaluate(
+            """() => {
+                if (document.queryCommandState('strikeThrough')) {
+                    document.execCommand('strikeThrough');
+                }
+            }"""
+        )
+    except Exception:
+        pass
 
 
 def _locate_first(page, frame, sel: str, timeout: int = 8000):
