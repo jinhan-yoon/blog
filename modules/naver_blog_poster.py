@@ -36,9 +36,6 @@ _STEALTH_INIT_SCRIPT = "Object.defineProperty(navigator, 'webdriver', { get: () 
 SEL_POPUP_CANCEL = ".se-popup-button-cancel, button:has-text('취소')"
 SEL_HELP_CLOSE = ".se-help-panel-close-button"
 SEL_TITLE = ".se-title-text .se-text-paragraph"
-# .se-component-content .se-text-paragraph만으로는 제목 영역도 같은 구조를 써서
-# .first가 제목 문단을 다시 잡아버릴 수 있어, se-title-text 하위가 아닌 것만 선택
-SEL_BODY = "xpath=//*[contains(concat(' ', normalize-space(@class), ' '), ' se-text-paragraph ')][not(ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' se-title-text ')])]"
 # has-text는 부분일치라 "예약발행" 버튼도 걸려 잘못 클릭될 수 있어, 텍스트가 정확히
 # "발행"인 요소만 선택 (:text-is는 공백 트리밍 후 완전일치). button 태그로 한정하지 않는 이유는
 # 실제 발행 요소가 button이 아닌 div/a일 수 있어서 (확인 전까지는 태그 제한을 두지 않음)
@@ -193,12 +190,11 @@ def publish_post(
 
             _log(log_callback, "본문 삽입 중...")
             _dismiss_popups(frame)
-            body_locator = frame.locator(SEL_BODY).first
-            body_locator.click()
-            # 본문 최초 커서 위치(placeholder 문단)에 취소선 서식이 걸려있는 경우가 있어,
-            # 타이핑 시작 전에 취소선 토글 버튼을 한 번 눌러 꺼둔다. DOM에서 <strike>를
-            # 직접 제거하는 방식은 발행 시 스마트에디터 내부 모델이 다시 덮어써서 무효했음
-            _ensure_strike_off(frame)
+            # 본문 placeholder 문단을 직접 클릭해서 거기 이어 타이핑하면 이상하게
+            # 취소선 서식이 계속 남아있었음 (DOM 제거·토글 버튼 클릭 둘 다 효과 없었음).
+            # 대신 제목에서 Enter로 자연스럽게 본문으로 넘어가는 방식으로 변경 —
+            # placeholder를 클릭한 적이 없으므로 그 잔여 서식을 아예 물려받지 않음
+            page.keyboard.press("Enter")
             for block in _html_to_blocks(content_html):
                 if block["type"] == "image":
                     _insert_image(frame, page, block["src"], log_callback)
@@ -273,16 +269,6 @@ def _click_last(page, frame, sel: str, timeout: int = 8000) -> None:
         page.locator(sel).last.click()
     except Exception:
         frame.locator(sel).last.click()
-
-
-def _ensure_strike_off(frame) -> None:
-    """본문 placeholder 문단에 취소선 서식이 걸려있는 경우가 있어, 토글 버튼을 찾아 한 번 눌러 끈다"""
-    try:
-        btn = frame.locator("[title*='취소선'], [aria-label*='취소선']").first
-        btn.wait_for(state="visible", timeout=1500)
-        btn.click()
-    except Exception:
-        pass
 
 
 def _dismiss_popups(frame) -> None:
