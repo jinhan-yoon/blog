@@ -19,22 +19,17 @@ _HEADERS = {
 
 
 # ── 개별 프로바이더 ──────────────────────────────────────────────────────────
+# 모든 프로바이더는 AI로 신규 생성된 이미지만 반환 — 저작권자가 있는 실사진(스톡 사진)은 쓰지 않음
 
-def _generate_pollinations(prompt: str) -> bytes:
-    """Pollinations.ai - 무료, API 키 불필요"""
+def _pollinations_url(prompt: str) -> str:
     safe = quote(f"blog post illustration: {prompt}, professional, clean, modern style")
     seed = abs(hash(prompt)) % 100000
-    url = f"https://image.pollinations.ai/prompt/{safe}?width=1024&height=576&seed={seed}&nologo=true&enhance=true"
-    resp = requests.get(url, timeout=45, headers=_HEADERS)
-    resp.raise_for_status()
-    return resp.content
+    return f"https://image.pollinations.ai/prompt/{safe}?width=1024&height=576&seed={seed}&nologo=true&enhance=true"
 
 
-def _generate_picsum(prompt: str) -> bytes:
-    """Lorem Picsum - 랜덤 고품질 사진, API 키 불필요, 항상 빠름"""
-    seed = abs(hash(prompt)) % 1000
-    url = f"https://picsum.photos/seed/{seed}/1024/576"
-    resp = requests.get(url, timeout=15, headers=_HEADERS)
+def _generate_pollinations(prompt: str) -> bytes:
+    """Pollinations.ai - 무료, API 키 불필요, AI 신규 생성"""
+    resp = requests.get(_pollinations_url(prompt), timeout=45, headers=_HEADERS)
     resp.raise_for_status()
     return resp.content
 
@@ -111,13 +106,13 @@ def _generate_claude_pollinations(prompt: str) -> bytes:
 
 PROVIDER_MAP = {
     "pollinations": _generate_pollinations,
-    "picsum":       _generate_picsum,
     "huggingface":  _generate_huggingface,
     "dalle":        _generate_dalle,
     "claude":       _generate_claude_pollinations,
 }
 
-PROVIDER_FALLBACK_ORDER = ["pollinations", "picsum"]
+# 키 없이 항상 시도 가능한 pollinations만 자동 fallback으로 사용 (실사진 스톡 소스는 제외)
+PROVIDER_FALLBACK_ORDER = ["pollinations"]
 
 
 def generate_image_bytes(prompt: str, provider: str | None = None) -> tuple[bytes, str]:
@@ -179,7 +174,7 @@ def generate_images_for_post(
         try:
             data, used_provider = generate_image_bytes(prompt, provider)
             # Blogger에 삽입할 외부 URL 생성 (base64 차단 회피)
-            url = get_image_url(prompt, used_provider)
+            url = get_image_url(prompt)
             results.append({
                 "bytes": data,
                 "provider": used_provider,
@@ -196,11 +191,10 @@ def generate_images_for_post(
             print(err_msg)
             if log_callback:
                 log_callback(err_msg)
-            seed = (i + 1) * 100
             results.append({
                 "bytes": None,
                 "provider": None,
-                "url": f"https://picsum.photos/seed/{seed}/1024/576",
+                "url": _pollinations_url(prompt),
                 "prompt": prompt,
                 "error": str(e),
             })
@@ -208,22 +202,12 @@ def generate_images_for_post(
     return results
 
 
-def get_image_url(prompt: str, provider: str | None = None) -> str:
-    """HTML 삽입용 URL 반환 (Pollinations URL 방식)"""
-    if provider is None:
-        provider = os.getenv("IMAGE_PROVIDER", "pollinations")
-
-    if provider in ("pollinations", "claude"):
-        safe = quote(f"blog post illustration: {prompt}, professional, clean, modern style")
-        seed = abs(hash(prompt)) % 100000
-        return f"https://image.pollinations.ai/prompt/{safe}?width=1024&height=576&seed={seed}&nologo=true"
-    elif provider == "picsum":
-        seed = abs(hash(prompt)) % 1000
-        return f"https://picsum.photos/seed/{seed}/1024/576"
-    else:
-        # dalle/huggingface는 URL을 미리 알 수 없으므로 Picsum으로 대체
-        seed = abs(hash(prompt)) % 1000
-        return f"https://picsum.photos/seed/{seed}/1024/576"
+def get_image_url(prompt: str) -> str:
+    """
+    HTML 삽입용 URL 반환. dalle/huggingface는 생성된 바이트를 올려둘 고정 URL이 없으므로,
+    저작권 걱정 없는 pollinations의 동일 프롬프트 URL로 대체한다 (실사진 스톡 소스는 쓰지 않음).
+    """
+    return _pollinations_url(prompt)
 
 
 def insert_images_into_html(content_html: str, image_data: list[dict]) -> str:
@@ -234,7 +218,7 @@ def insert_images_into_html(content_html: str, image_data: list[dict]) -> str:
     """
     result = content_html
     for i, item in enumerate(image_data, 1):
-        # 외부 URL 우선 (Blogger 호환) → base64 → Picsum fallback
+        # 외부 URL 우선 (Blogger 호환) → base64 → pollinations fallback (실사진 스톡 소스는 쓰지 않음)
         if item.get("url"):
             src = item["url"]
         elif item.get("bytes"):
@@ -242,7 +226,7 @@ def insert_images_into_html(content_html: str, image_data: list[dict]) -> str:
             b64 = base64.b64encode(item["bytes"]).decode()
             src = f"data:image/jpeg;base64,{b64}"
         else:
-            src = f"https://picsum.photos/seed/{i * 100}/1024/576"
+            src = _pollinations_url(item.get("prompt", "blog post illustration"))
 
         img_tag = (
             f'<div style="text-align:center; margin:20px 0;">'

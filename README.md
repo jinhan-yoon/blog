@@ -67,7 +67,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 CLAUDE_MODEL=claude-sonnet-4-6
 
 # 이미지 생성
-IMAGE_PROVIDER=pollinations        # pollinations | picsum | huggingface | claude | dalle
+IMAGE_PROVIDER=pollinations        # pollinations | huggingface | claude | dalle
 OPENAI_API_KEY=sk-...              # DALL-E 3용 (선택)
 HUGGINGFACE_TOKEN=hf_...           # HuggingFace SD XL용 (선택)
 
@@ -208,15 +208,16 @@ python naver_setup.py --headless
 
 ## 🖼️ 이미지 생성 프로바이더
 
+전부 AI로 신규 생성된 이미지만 사용합니다 — 저작권자가 있는 실사 스톡 사진(Picsum 등)은 쓰지 않습니다.
+
 | 프로바이더 | API 키 | 속도 | 품질 | 비고 |
 |-----------|--------|------|------|------|
 | `pollinations` | 불필요 | 보통 (10-30초) | AI 생성 | 기본값, 자동 fallback |
-| `picsum` | 불필요 | 빠름 (1-2초) | 실사 사진 | 항상 성공, 2순위 fallback |
 | `huggingface` | 필요 (무료) | 느림 | AI 생성 | SD XL 모델 |
 | `claude` | 필요 | 보통 | AI 생성 | Claude가 프롬프트 강화 후 Pollinations |
 | `dalle` | 필요 (유료) | 보통 | 최고 | DALL-E 3 |
 
-**Fallback 순서**: 지정 프로바이더 → `pollinations` → `picsum`
+**Fallback 순서**: 지정 프로바이더 → `pollinations` (키 없이 항상 시도 가능한 AI 생성 프로바이더)
 
 ---
 
@@ -255,6 +256,7 @@ RuntimeError 발생
 
 | 날짜 | 변경 내용 |
 |------|-----------|
+| 2026-07-24 | 이미지 생성에서 Picsum(실사 스톡 사진) 제거 — 전 프로바이더 AI 신규 생성으로 통일 |
 | 2026-07-23 | naver_setup.py에 --headless 옵션 추가 (GUI 없는 서버에서 ID/PW 자동 로그인) |
 | 2026-07-22 | 구글/네이버 발행 버튼 분리 (독립 실행), 배포 파이프라인 안정화 |
 | 2026-07-22 | 네이버 블로그 동시 발행 기능 추가 (Playwright UI 자동화) |
