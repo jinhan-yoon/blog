@@ -46,6 +46,12 @@ def main() -> None:
             else:
                 _manual_login(page)
 
+            # nid.naver.com 로그인만으로는 blog.naver.com 전용 쿠키가 세션에 포함되지 않아
+            # 다른 서버로 세션을 옮기면 글쓰기 페이지에서 다시 로그인 화면으로 튕길 수 있음 —
+            # 저장 전에 블로그 도메인을 한 번 방문해 관련 쿠키까지 확보
+            page.goto("https://blog.naver.com/", wait_until="domcontentloaded")
+            page.wait_for_timeout(1500)
+
             context.storage_state(path=str(SESSION_PATH))
             print(f"✅ 세션 저장 완료: {SESSION_PATH.resolve()}")
 
