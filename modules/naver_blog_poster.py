@@ -5,6 +5,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -153,8 +154,8 @@ def publish_post(
     """
     네이버 블로그에 포스팅 발행 (Playwright + Smart Editor ONE UI 자동화).
 
-    본문은 기존에 생성된 HTML(이미지 포함)을 그대로 클립보드 붙여넣기 방식으로
-    에디터에 주입합니다. 표·스티커 등 복잡한 컴포넌트는 지원하지 않습니다.
+    본문 HTML은 문단 텍스트만 추출해 실제 키 입력처럼 타이핑해 넣습니다.
+    굵게/제목 등 서식과 이미지(<img>)는 반영되지 않는 평문 발행입니다.
 
     Returns:
         {"url": str|None, "error": str|None, "screenshot": str|None}
@@ -192,8 +193,10 @@ def publish_post(
             _dismiss_popups(frame)
             body_locator = frame.locator(SEL_BODY).first
             body_locator.click()
-            _paste_html(body_locator, content_html)
-            page.wait_for_timeout(1500)
+            for block in _html_to_text_blocks(content_html):
+                page.keyboard.type(block, delay=3)
+                page.keyboard.press("Enter")
+            page.wait_for_timeout(800)
 
             _log(log_callback, "발행 설정 중...")
             frame.locator(SEL_PUBLISH_OPEN).first.click()
@@ -250,22 +253,24 @@ def _dismiss_popups(frame) -> None:
             pass
 
 
-def _paste_html(locator, content_html: str) -> None:
+def _html_to_text_blocks(content_html: str) -> list[str]:
     """
-    본문 영역에 HTML을 클립보드 붙여넣기 이벤트로 주입 (raw HTML 입력 API가 없어 이 방식 사용).
-    :focus로 포커스된 엘리먼트를 다시 찾지 않고, 클릭에 사용한 로케이터를 그대로 evaluate 대상으로 써서
-    포커스가 다른 자식 엘리먼트로 옮겨가 엉뚱한 곳에 붙여넣기 되는 문제를 막는다.
+    HTML 본문을 문단 단위 평문으로 변환.
+    Smart Editor는 합성 ClipboardEvent를 통한 붙여넣기를 실제로 반영하지 않아
+    (paste 이벤트는 발생해도 콘텐츠가 삽입되지 않음), 실제 키 입력을 흉내내는
+    keyboard.type()으로 문단을 하나씩 입력하는 방식을 사용한다.
+    이 과정에서 굵게/제목 등 서식과 <img>는 반영되지 않는다.
     """
-    locator.evaluate(
-        """(el, html) => {
-            const dt = new DataTransfer();
-            dt.setData('text/html', html);
-            dt.setData('text/plain', html.replace(/<[^>]+>/g, ' '));
-            const evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
-            el.dispatchEvent(evt);
-        }""",
-        content_html,
-    )
+    soup = BeautifulSoup(content_html, "html.parser")
+    blocks = [
+        text for tag in soup.find_all(["p", "h1", "h2", "h3", "h4", "li", "blockquote"])
+        if (text := tag.get_text(" ", strip=True))
+    ]
+    if not blocks:
+        text = soup.get_text(" ", strip=True)
+        if text:
+            blocks = [text]
+    return blocks
 
 
 def _log(log_callback, msg: str) -> None:
