@@ -664,6 +664,15 @@ elif cur == "publish":
                                 '터미널에서 <code>python naver_setup.py</code>를 실행해 로그인을 완료해주세요.</div>',
                                 unsafe_allow_html=True)
 
+                _naver_error_dir = Path("naver_errors")
+                _error_shots = sorted(_naver_error_dir.glob("*.png"), reverse=True) if _naver_error_dir.exists() else []
+                if _error_shots:
+                    with st.expander(f"🖼️ 네이버 오류 스크린샷 ({len(_error_shots)}개, 최근순)"):
+                        for _shot in _error_shots[:10]:
+                            st.caption(_shot.name)
+                            st.image(str(_shot), use_container_width=True)
+                            st.divider()
+
                 st.divider()
 
                 if st.button("💿 로컬 저장 (data 폴더)", use_container_width=True):
