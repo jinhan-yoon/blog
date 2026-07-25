@@ -116,6 +116,7 @@ def init_session():
         "oauth_redirect_uri":   None,
         "oauth_code_verifier":  None,
         "manual_keywords":      [],
+        "blogger_recent_posts": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -726,20 +727,46 @@ elif cur == "publish":
                 if auth["ready"]:
                     try:
                         from modules.blogger_publisher import list_recent_posts
-                        posts = list_recent_posts()
-                        for p in posts:
-                            status_icon = "🟢" if p["status"] == "LIVE" else "📝"
-                            c1, c2 = st.columns([4, 1])
-                            with c1:
-                                st.markdown(f"{status_icon} [{p['title']}]({p.get('url', '#')}) · "
-                                            f"{p['published'][:10] if p['published'] else ''}")
-                            with c2:
-                                if st.button("삭제", key=f"del_{p['id']}", use_container_width=True):
-                                    st.info("(삭제 기능은 다음 버전에서 추가됩니다)")
+                        st.session_state.blogger_recent_posts = list_recent_posts()
                     except Exception as e:
                         st.error(f"조회 실패: {e}")
                 else:
                     st.warning("Blogger 인증이 필요합니다.")
+
+            if st.session_state.blogger_recent_posts:
+                for p in st.session_state.blogger_recent_posts:
+                    status_icon = "🟢" if p["status"] == "LIVE" else "📝"
+                    c1, c2 = st.columns([4, 1])
+                    with c1:
+                        st.markdown(f"{status_icon} [{p['title']}]({p.get('url', '#')}) · "
+                                    f"{p['published'][:10] if p['published'] else ''}")
+                    with c2:
+                        if st.button("삭제", key=f"del_{p['id']}", use_container_width=True):
+                            st.session_state[f"confirm_del_blog_{p['id']}"] = True
+                            st.rerun()
+
+                    if st.session_state.get(f"confirm_del_blog_{p['id']}"):
+                        st.warning(f"⚠️ '{p['title']}' 을(를) Blogger에서 삭제하시겠습니까?")
+                        d1, d2 = st.columns(2)
+                        with d1:
+                            if st.button("✅ 확인 삭제", key=f"do_del_blog_{p['id']}",
+                                         use_container_width=True, type="primary"):
+                                try:
+                                    from modules.blogger_publisher import delete_post
+                                    delete_post(p["id"])
+                                    st.session_state.blogger_recent_posts = [
+                                        x for x in st.session_state.blogger_recent_posts
+                                        if x["id"] != p["id"]
+                                    ]
+                                    del st.session_state[f"confirm_del_blog_{p['id']}"]
+                                    st.success("삭제 완료")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"삭제 실패: {e}")
+                        with d2:
+                            if st.button("취소", key=f"cancel_del_blog_{p['id']}", use_container_width=True):
+                                del st.session_state[f"confirm_del_blog_{p['id']}"]
+                                st.rerun()
 
     # ── TAB 2: 저장된 글 관리 ─────────────────────────────
     with pub_tab2:

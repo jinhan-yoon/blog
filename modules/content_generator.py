@@ -5,12 +5,74 @@ import os
 import json
 import re
 import requests as _requests
+from bs4 import BeautifulSoup as _BeautifulSoup
 from dotenv import load_dotenv
 
 load_dotenv()
 
+_SEARCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
+}
+
 # 마지막으로 사용된 LLM 추적 (사이드바 표시용)
 _last_provider: dict = {"name": None, "model": None}
+
+
+# ── 실제 검색 결과 조사 (키워드 기반 지어내기 방지) ──────────────────────────
+
+def _search_naver_news(keyword: str, limit: int = 4) -> list[dict]:
+    """네이버 뉴스 검색 결과에서 실제 기사 제목·요약을 가져와 콘텐츠 생성의 근거로 사용"""
+    try:
+        resp = _requests.get(
+            "https://search.naver.com/search.naver",
+            params={"where": "news", "query": keyword, "sort": "1"},
+            headers=_SEARCH_HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        soup = _BeautifulSoup(resp.text, "html.parser")
+
+        results = []
+        for item in soup.select("div.news_wrap, li.bx")[:limit]:
+            title_tag = item.select_one("a.news_tit")
+            desc_tag = item.select_one("div.news_dsc, a.api_txt_lines, .dsc_wrap")
+            title = title_tag.get_text(strip=True) if title_tag else ""
+            if not title:
+                continue
+            results.append({
+                "title": title,
+                "summary": desc_tag.get_text(strip=True) if desc_tag else "",
+            })
+        return results
+    except Exception:
+        return []
+
+
+def research_keywords(keywords: list[str], per_keyword: int = 3) -> list[dict]:
+    """키워드별 실제 뉴스 검색 결과 수집 (실패해도 빈 리스트 반환, 생성 자체는 계속 진행됨)"""
+    research = []
+    for kw in keywords[:3]:
+        for item in _search_naver_news(kw, limit=per_keyword):
+            research.append({"keyword": kw, **item})
+    return research
+
+
+def _format_research_block(research: list[dict]) -> str:
+    """프롬프트에 삽입할 실제 검색 결과 텍스트 블록 생성"""
+    if not research:
+        return ""
+
+    lines = [f"- [{r['keyword']}] {r['title']}" + (f" — {r['summary']}" if r.get("summary") else "")
+             for r in research]
+    return (
+        "\n\n# 실제 검색 결과 (반드시 아래 사실에 기반해서 작성하세요. 지어내지 마세요)\n"
+        + "\n".join(lines)
+        + "\n\n위 검색 결과와 모순되는 내용, 확인되지 않은 추측을 사실처럼 서술하지 마세요. "
+        "검색 결과가 부족한 부분은 일반적이고 안전한 서술로 채우세요."
+    )
 
 
 # ── LLM 상태 확인 ──────────────────────────────────────────────────────────────
@@ -131,9 +193,11 @@ def _parse_json(text: str, fallback):
 
 def suggest_topics(keywords: list[str], count: int = 5) -> list[dict]:
     kw_str = ", ".join(keywords)
+    research_block = _format_research_block(research_keywords(keywords))
     prompt = f"""당신은 SEO 전문가이자 블로그 콘텐츠 전략가입니다.
 다음은 오늘의 트렌드 키워드 목록입니다:
 {kw_str}
+{research_block}
 
 위 키워드를 분석하여 블로그 포스팅에 적합한 주제 {count}개를 추천해주세요.
 각 주제는 검색량이 높고 독자의 관심을 끌 수 있어야 합니다.
@@ -154,6 +218,7 @@ def suggest_topics(keywords: list[str], count: int = 5) -> list[dict]:
 
 def generate_blog_post(title: str, keywords: list[str], tone: str = "정보전달") -> dict:
     kw_str = ", ".join(keywords)
+    research_block = _format_research_block(research_keywords([title] + keywords))
     prompt = f"""# Role
 당신은 10년 이상 블로그를 운영해온 실제 한국인 블로거입니다. 구글 SEO, 애드센스 정책, 그리고 구글의 AI 콘텐츠 감지 시스템을 누구보다 잘 알고 있습니다.
 
@@ -201,6 +266,7 @@ def generate_blog_post(title: str, keywords: list[str], tone: str = "정보전�
 - 제목: {title}
 - 톤: {tone}
 - 타겟: 일반 한국인 인터넷 독자
+{research_block}
 
 반드시 아래 JSON 형식으로만 답하세요 (마크다운 없이 순수 JSON):
 {{

@@ -196,6 +196,17 @@ def publish_post(
     }
 
 
+def delete_post(post_id: str, blog_id: str | None = None) -> None:
+    """Blogger에서 포스팅 삭제"""
+    blog_id = blog_id or os.getenv("BLOGGER_BLOG_ID", "")
+    if not blog_id:
+        raise ValueError("BLOGGER_BLOG_ID가 설정되지 않았습니다.")
+
+    creds = _get_credentials()
+    service = build("blogger", "v3", credentials=creds)
+    service.posts().delete(blogId=blog_id, postId=post_id).execute()
+
+
 def list_recent_posts(blog_id: str | None = None, max_results: int = 10) -> list[dict]:
     """최근 포스팅 목록 조회"""
     blog_id = blog_id or os.getenv("BLOGGER_BLOG_ID", "")
