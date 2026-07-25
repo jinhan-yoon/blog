@@ -295,6 +295,7 @@ def generate_blog_post(title: str, keywords: list[str], tone: str = "정보전�
                 for i in range(3 - len(result.get("image_prompts", [])))
             ]
         result["content_html"] = _ensure_image_placeholders(result.get("content_html", ""))
+        result["content_html"] = _apply_readability_styles(result["content_html"])
         return result
 
     return {
@@ -338,6 +339,31 @@ def _ensure_image_placeholders(html: str) -> str:
                 base_pos += len(ph)
 
     return html
+
+
+def _apply_readability_styles(html: str) -> str:
+    """
+    문단이 너무 촘촘해 보이지 않도록 글자크기·자간·줄간격·문단 여백을 인라인 스타일로 적용.
+    Naver 발행은 문단 텍스트만 추출해 타이핑하므로 이 스타일과 무관하고,
+    풀 HTML을 그대로 쓰는 Blogger 발행에만 실제로 반영된다.
+    """
+    soup = _BeautifulSoup(html, "html.parser")
+
+    styles = {
+        "p":          "font-size:16px; line-height:1.9; letter-spacing:-0.2px; margin:0 0 1.3em 0;",
+        "li":         "font-size:16px; line-height:1.9; letter-spacing:-0.2px; margin:0 0 0.6em 0;",
+        "h2":         "line-height:1.5; letter-spacing:-0.3px; margin:1.8em 0 0.8em 0;",
+        "h3":         "line-height:1.5; letter-spacing:-0.3px; margin:1.4em 0 0.6em 0;",
+        "blockquote": "font-size:16px; line-height:1.8; letter-spacing:-0.2px; margin:1em 0;",
+    }
+    for tag_name, style in styles.items():
+        for tag in soup.find_all(tag_name):
+            existing = (tag.get("style") or "").strip()
+            if existing and not existing.endswith(";"):
+                existing += ";"
+            tag["style"] = existing + style
+
+    return str(soup)
 
 
 def refine_content(content_html: str, instruction: str) -> str:
