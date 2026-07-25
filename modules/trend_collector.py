@@ -52,6 +52,36 @@ def get_loword_trends(date: str | None = None) -> dict:
     return {"naver": [], "google": []}
 
 
+# ── signal.bz 실시간 검색어 (네이버·구글과 다른 자체 집계) ───────────────────
+def get_signal_trends() -> list[dict]:
+    """signal.bz 실시간 검색어 API로 실시간 top10 키워드 수집"""
+    url = "https://api.signal.bz/news/realtime"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://signal.bz/",
+        "Accept": "application/json",
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            {
+                "rank": item.get("rank"),
+                "keyword": item.get("keyword", ""),
+                "state": item.get("state", ""),
+                "source": "signal",
+            }
+            for item in data.get("top10", [])
+            if item.get("keyword")
+        ]
+    except Exception:
+        return []
+
+
 # ── Google Trends RSS (로워드 구글 데이터 보완용) ────────────────────────────
 def get_google_trends_rss() -> list[dict]:
     """Google Trends 실시간 급상승 검색어 RSS (한국, 상세 뉴스 포함)"""
@@ -90,12 +120,25 @@ def get_google_trends_rss() -> list[dict]:
 
 # ── 통합 수집 ────────────────────────────────────────────────────────────────
 def collect_all_trends() -> dict:
-    """로워드 API + Google Trends RSS 통합 수집"""
+    """로워드 API + Google Trends RSS + signal.bz 통합 수집"""
     loword = get_loword_trends()
     google_rss = get_google_trends_rss()
+    signal_raw = get_signal_trends()
 
     naver_raw = loword.get("naver", [])
     google_raw = loword.get("google", [])
+
+    # signal.bz 키워드 정규화 (state: n=신규, +=상승, -=하락, s=유지)
+    signal = [
+        {
+            "rank": kw.get("rank"),
+            "keyword": kw.get("keyword", ""),
+            "caret": {"n": "NEW", "+": "Up", "-": "Down"}.get(kw.get("state", ""), ""),
+            "source": "signal",
+        }
+        for kw in signal_raw
+        if kw.get("keyword")
+    ]
 
     # 로워드 네이버 키워드 정규화
     naver = [
@@ -164,10 +207,20 @@ def collect_all_trends() -> dict:
                 "caret": "",
                 "source": "구글",
             })
+    for kw in signal:
+        if kw["keyword"] and kw["keyword"] not in seen:
+            seen.add(kw["keyword"])
+            merged.append({
+                "keyword": kw["keyword"],
+                "traffic": f"#{kw['rank']}" if kw.get("rank") else "",
+                "caret": kw.get("caret", ""),
+                "source": "시그널",
+            })
 
     return {
         "collected_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "naver": naver,
         "google": google,
+        "signal": signal,
         "merged": merged,
     }

@@ -282,7 +282,7 @@ if cur == "trends":
     if st.session_state.trends:
         trends = st.session_state.trends
         st.divider()
-        col_n, col_g = st.columns(2)
+        col_n, col_g, col_s = st.columns(3)
 
         with col_n:
             st.markdown("#### 🟢 네이버 실시간 검색어")
@@ -304,6 +304,16 @@ if cur == "trends":
                     st.markdown(f"`{str(kw['rank']).zfill(2)}` **{kw['keyword']}**{ts}")
             else:
                 st.info("구글 데이터 없음")
+
+        with col_s:
+            st.markdown("#### 🟣 시그널 실시간 검색어")
+            signal_kws = trends.get("signal", [])
+            if signal_kws:
+                for kw in signal_kws[:20]:
+                    caret_icon = {"NEW": "🆕", "Up": "🔺", "Down": "🔻"}.get(kw.get("caret", ""), "➖")
+                    st.markdown(f"`{str(kw['rank']).zfill(2)}` {caret_icon} **{kw['keyword']}**")
+            else:
+                st.info("시그널 데이터 없음")
 
         st.divider()
         st.markdown("**📌 자동 수집 키워드에서 선택하세요:**")
@@ -1333,6 +1343,8 @@ Claude가 프롬프트를 영어로 강화 후 Pollinations으로 렌더링.<br>
 <b>Google Trends RSS</b> <span class="tech-badge">공식</span><br>
 <code>trends.google.com</code> 공식 RSS 피드.<br>
 한국(KR) 실시간 급상승 검색어와 관련 뉴스를 파싱합니다.<br><br>
+<b>signal.bz</b> <span class="tech-badge">서드파티</span><br>
+signal.bz 자체 집계 실시간 검색어 top10 API. 네이버·구글과 다른 독립 소스로 보완용.<br><br>
 <b>BeautifulSoup4 + lxml</b> <span class="tech-badge">v4.12+</span><br>
 RSS XML 및 HTML 콘텐츠 파싱 라이브러리.
 </div>

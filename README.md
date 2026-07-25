@@ -23,7 +23,7 @@ Google Trends → AI 콘텐츠 생성 → 이미지 생성 → Google Blogger �
 | 이미지 생성 | Pollinations.ai | 무료, API 키 불필요 (기본값) |
 | 이미지 생성 | HuggingFace SD XL | 무료 토큰 필요 |
 | 이미지 생성 | DALL-E 3 | 유료, OpenAI API 키 필요 |
-| 트렌드 수집 | Loword API + Google Trends RSS | 실시간 급상승 검색어 |
+| 트렌드 수집 | Loword API + Google Trends RSS + signal.bz | 실시간 급상승 검색어 |
 | 발행 | Google Blogger API v3 | OAuth 2.0 (PKCE S256) |
 | 발행 | 네이버 블로그 (Playwright) | 공식 API 없음, UI 자동화 |
 | 환경 변수 | python-dotenv | `.env` 파일 |
@@ -45,7 +45,7 @@ blog/
 ├── naver_session.json        # 네이버 로그인 세션 (git 제외, naver_setup.py로 자동 생성)
 ├── naver_errors/             # 네이버 발행 실패 시 스크린샷 저장 (git 제외)
 └── modules/
-    ├── trend_collector.py    # 트렌드 수집 (Loword + Google RSS)
+    ├── trend_collector.py    # 트렌드 수집 (Loword + Google RSS + signal.bz)
     ├── content_generator.py  # LLM 콘텐츠 생성 (vLLM → Claude 자동 fallback)
     ├── image_generator.py    # 이미지 생성 (다중 프로바이더, 자동 fallback)
     ├── blogger_publisher.py  # Google Blogger API 발행 (PKCE OAuth)
@@ -293,6 +293,7 @@ RuntimeError 발생
 
 | 날짜 | 변경 내용 |
 |------|-----------|
+| 2026-07-25 | 트렌드 수집에 signal.bz 추가, 본문 가독성(줄간격·자간·여백) 개선 |
 | 2026-07-25 | 구글 계정 로그인 게이트 추가 (지정 이메일만 접근 허용), 콘텐츠 생성 시 실제 검색 결과 반영, Blogger 포스팅 삭제 기능 |
 | 2026-07-24 | 이미지 생성에서 Picsum(실사 스톡 사진) 제거 — 전 프로바이더 AI 신규 생성으로 통일 |
 | 2026-07-23 | naver_setup.py에 --headless 옵션 추가 (GUI 없는 서버에서 ID/PW 자동 로그인) |
