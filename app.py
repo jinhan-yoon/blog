@@ -14,6 +14,31 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── 구글 로그인 게이트 ────────────────────────────────────────────────────────
+from modules.app_auth import is_configured as _auth_configured, get_login_url, complete_login
+
+APP_BASE_URL = os.getenv("APP_BASE_URL", "https://blog.superip.net")
+
+if _auth_configured():
+    if "authenticated_email" not in st.session_state:
+        st.session_state.authenticated_email = None
+
+    if not st.session_state.authenticated_email:
+        _code = st.query_params.get("code")
+        if _code:
+            try:
+                st.session_state.authenticated_email = complete_login(_code, APP_BASE_URL)
+                st.query_params.clear()
+                st.rerun()
+            except Exception as e:
+                st.query_params.clear()
+                st.error(f"❌ 로그인 실패: {e}")
+                st.stop()
+        else:
+            st.title("🔒 로그인이 필요합니다")
+            st.markdown(f"[🔑 구글 계정으로 로그인]({get_login_url(APP_BASE_URL)})")
+            st.stop()
+
 # ── 페이지 정의 ──────────────────────────────────────────────────────────────
 PAGES = [
     {"key": "trends",   "icon": "📊", "title": "트렌드 수집",   "step": 1},
@@ -178,6 +203,13 @@ with st.sidebar:
         st.caption(f"사용중: {llm_status['last_provider']} · {llm_status['last_model']}")
     if not llm_status["any_available"]:
         st.warning("⚙️ LLM 설정 필요")
+
+    if st.session_state.get("authenticated_email"):
+        st.divider()
+        st.caption(f"👤 {st.session_state.authenticated_email}")
+        if st.button("🚪 로그아웃", use_container_width=True):
+            st.session_state.authenticated_email = None
+            st.rerun()
 
 # ════════════════════════════════════════════════════════
 # STEP 1: 트렌드 수집
@@ -936,6 +968,26 @@ elif cur == "settings":
         hf_token       = st.text_input("HuggingFace Token (SD XL용, 무료)", value=os.getenv("HUGGINGFACE_TOKEN", ""), type="password",
                                        help="huggingface.co 회원가입 후 Settings > Access Tokens에서 무료 발급")
 
+        st.markdown("### 🔒 앱 로그인 (구글 계정)")
+        app_base_url = st.text_input("앱 접속 주소", value=os.getenv("APP_BASE_URL", "https://blog.superip.net"),
+                                      help="구글 OAuth 클라이언트의 승인된 리디렉션 URI와 정확히 일치해야 함")
+        allowed_email = st.text_input("로그인 허용 구글 이메일", value=os.getenv("ALLOWED_GOOGLE_EMAIL", ""))
+
+        _login_secret_path = Path("login_client_secret.json")
+        st.write(f"{'✅' if _login_secret_path.exists() else '❌'} login_client_secret.json")
+        _login_uploaded = st.file_uploader("login_client_secret.json 업로드 (Web application 타입)",
+                                            type="json", key="login_secret_uploader")
+        if _login_uploaded:
+            with open(_login_secret_path, "wb") as f:
+                f.write(_login_uploaded.read())
+            st.success("✅ login_client_secret.json 저장됨")
+
+        from modules.app_auth import is_configured as _login_configured
+        if _login_configured():
+            st.success("✅ 로그인 게이트 활성화됨 — 설정 저장 후에는 지정된 계정으로만 접근 가능")
+        else:
+            st.caption("이메일과 클라이언트 파일을 모두 설정해야 로그인 게이트가 켜집니다.")
+
     with col2:
         st.markdown("### 🟢 네이버 블로그")
         naver_id = st.text_input("네이버 아이디", value=os.getenv("NAVER_ID", ""))
@@ -1093,6 +1145,10 @@ BLOGGER_BLOG_ID={blog_id}
 NAVER_ID={naver_id}
 NAVER_PW={naver_pw}
 NAVER_BLOG_ID={naver_blog_id}
+
+# ── 앱 로그인 게이트 ────────────────────────────────────
+APP_BASE_URL={app_base_url}
+ALLOWED_GOOGLE_EMAIL={allowed_email}
 """
         with open(".env", "w") as f:
             f.write(env_content)

@@ -206,6 +206,43 @@ python naver_setup.py --headless
 
 ---
 
+## 🔒 앱 로그인 게이트 (구글 계정으로 접근 제한)
+
+지정된 구글 계정만 이 앱에 접근할 수 있도록 로그인 화면을 추가할 수 있습니다.
+설정하지 않으면(파일·이메일 미설정) 기존처럼 로그인 없이 접근됩니다.
+
+### 1. Google Cloud Console에서 별도 OAuth 클라이언트 생성
+
+Blogger 연동용 `client_secret.json`(Desktop app 타입)과는 **다른, 별도의 클라이언트**가 필요합니다.
+Desktop app 타입은 로그인 후 실제 사이트로 자동 복귀가 안 되기 때문입니다.
+
+1. [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services > Credentials**
+2. **Create Credentials > OAuth 2.0 Client ID**
+3. **애플리케이션 유형: Web application** 선택 ← Blogger용과 다름, 반드시 Web application!
+4. **승인된 리디렉션 URI**에 앱 접속 주소를 정확히 등록 (예: `https://blog.superip.net`)
+5. JSON 다운로드 → `login_client_secret.json` 으로 저장
+
+### 2. 앱에서 설정
+
+1. 설정 탭 → **🔒 앱 로그인 (구글 계정)** 섹션
+2. **앱 접속 주소**: 위 리디렉션 URI와 정확히 일치하는 값 입력
+3. **로그인 허용 구글 이메일**: 접근을 허용할 계정 1개 입력
+4. `login_client_secret.json` 업로드
+5. **💾 설정 저장** 클릭
+
+저장 직후부터 로그인 게이트가 켜집니다. 다음 접속부터 구글 로그인 화면이 먼저 뜨고,
+지정한 이메일로 로그인해야만 대시보드가 보입니다.
+
+### ⚠️ 주의
+
+- 이메일을 잘못 입력하고 저장하면 본인도 접근이 막힐 수 있습니다. 이 경우 서버에서
+  `.env`의 `ALLOWED_GOOGLE_EMAIL`을 수정하거나 `login_client_secret.json`을 지우면
+  게이트가 다시 꺼집니다.
+- 로그인 상태는 브라우저 세션(탭)에 유지되며, 페이지를 완전히 새로고침하면 다시
+  로그인해야 합니다.
+
+---
+
 ## 🖼️ 이미지 생성 프로바이더
 
 전부 AI로 신규 생성된 이미지만 사용합니다 — 저작권자가 있는 실사 스톡 사진(Picsum 등)은 쓰지 않습니다.
@@ -256,6 +293,7 @@ RuntimeError 발생
 
 | 날짜 | 변경 내용 |
 |------|-----------|
+| 2026-07-25 | 구글 계정 로그인 게이트 추가 (지정 이메일만 접근 허용), 콘텐츠 생성 시 실제 검색 결과 반영, Blogger 포스팅 삭제 기능 |
 | 2026-07-24 | 이미지 생성에서 Picsum(실사 스톡 사진) 제거 — 전 프로바이더 AI 신규 생성으로 통일 |
 | 2026-07-23 | naver_setup.py에 --headless 옵션 추가 (GUI 없는 서버에서 ID/PW 자동 로그인) |
 | 2026-07-22 | 구글/네이버 발행 버튼 분리 (독립 실행), 배포 파이프라인 안정화 |
