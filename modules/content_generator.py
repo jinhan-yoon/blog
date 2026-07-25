@@ -24,7 +24,11 @@ _last_provider: dict = {"name": None, "model": None}
 # ── 실제 검색 결과 조사 (키워드 기반 지어내기 방지) ──────────────────────────
 
 def _search_naver_news(keyword: str, limit: int = 4) -> list[dict]:
-    """네이버 뉴스 검색 결과에서 실제 기사 제목·요약을 가져와 콘텐츠 생성의 근거로 사용"""
+    """
+    네이버 뉴스 검색 결과에서 실제 기사 제목·요약을 가져와 콘텐츠 생성의 근거로 사용.
+    네이버 검색 결과는 sds-comps-text-type-headline1(제목)/-body1(요약) 클래스로
+    구성되며(2026-07 기준 확인), 문서 순서상 1:1로 짝지어 나타난다.
+    """
     try:
         resp = _requests.get(
             "https://search.naver.com/search.naver",
@@ -35,16 +39,16 @@ def _search_naver_news(keyword: str, limit: int = 4) -> list[dict]:
         resp.raise_for_status()
         soup = _BeautifulSoup(resp.text, "html.parser")
 
+        titles = [t.get_text(strip=True) for t in soup.select(".sds-comps-text-type-headline1")]
+        summaries = [s.get_text(strip=True) for s in soup.select(".sds-comps-text-type-body1")]
+
         results = []
-        for item in soup.select("div.news_wrap, li.bx")[:limit]:
-            title_tag = item.select_one("a.news_tit")
-            desc_tag = item.select_one("div.news_dsc, a.api_txt_lines, .dsc_wrap")
-            title = title_tag.get_text(strip=True) if title_tag else ""
+        for i, title in enumerate(titles[:limit]):
             if not title:
                 continue
             results.append({
                 "title": title,
-                "summary": desc_tag.get_text(strip=True) if desc_tag else "",
+                "summary": summaries[i] if i < len(summaries) else "",
             })
         return results
     except Exception:
