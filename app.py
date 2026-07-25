@@ -47,6 +47,7 @@ PAGES = [
     {"key": "media",    "icon": "🎨", "title": "미디어",         "step": 3},
     {"key": "publish",  "icon": "🚀", "title": "발행",           "step": 4},
     {"key": "settings", "icon": "⚙️", "title": "설정",           "step": None},
+    {"key": "logs",     "icon": "🪵", "title": "오류 로그",       "step": None},
     {"key": "manual",   "icon": "📚", "title": "매뉴얼",         "step": None},
 ]
 PROCESS_KEYS = ["trends", "content", "media", "publish"]
@@ -205,12 +206,15 @@ with st.sidebar:
     if not llm_status["any_available"]:
         st.warning("⚙️ LLM 설정 필요")
 
-    if st.session_state.get("authenticated_email"):
-        st.divider()
-        st.caption(f"👤 {st.session_state.authenticated_email}")
-        if st.button("🚪 로그아웃", use_container_width=True):
-            st.session_state.authenticated_email = None
-            st.rerun()
+# ── 우측 상단 계정 표시 ───────────────────────────────────────────────────────
+if st.session_state.get("authenticated_email"):
+    _acc_l, _acc_r = st.columns([5, 1])
+    with _acc_r:
+        with st.popover(f"👤 {st.session_state.authenticated_email.split('@')[0]}", use_container_width=True):
+            st.caption(st.session_state.authenticated_email)
+            if st.button("🚪 로그아웃", use_container_width=True, key="logout_top"):
+                st.session_state.authenticated_email = None
+                st.rerun()
 
 # ════════════════════════════════════════════════════════
 # STEP 1: 트렌드 수집
@@ -663,15 +667,6 @@ elif cur == "publish":
                     st.markdown('<div class="warn-box">⚠️ 설정 메뉴에서 네이버 계정을 입력하고, '
                                 '터미널에서 <code>python naver_setup.py</code>를 실행해 로그인을 완료해주세요.</div>',
                                 unsafe_allow_html=True)
-
-                _naver_error_dir = Path("naver_errors")
-                _error_shots = sorted(_naver_error_dir.glob("*.png"), reverse=True) if _naver_error_dir.exists() else []
-                if _error_shots:
-                    with st.expander(f"🖼️ 네이버 오류 스크린샷 ({len(_error_shots)}개, 최근순)"):
-                        for _shot in _error_shots[:10]:
-                            st.caption(_shot.name)
-                            st.image(str(_shot), use_container_width=True)
-                            st.divider()
 
                 st.divider()
 
@@ -1215,6 +1210,26 @@ Desktop app 타입에서는 정상입니다. 브라우저 주소창의 URL(http:
 - 요청당 이미지 1024×576 픽셀 생성
 - 상업적 이용 가능 / 생성 소요 시간: 5-15초
         """)
+
+# ════════════════════════════════════════════════════════
+# 오류 로그
+# ════════════════════════════════════════════════════════
+elif cur == "logs":
+    st.markdown('<div class="step-header">🪵 오류 로그 · 네이버 발행 실패 스크린샷</div>', unsafe_allow_html=True)
+
+    _naver_error_dir = Path("naver_errors")
+    _error_shots = sorted(_naver_error_dir.glob("*.png"), reverse=True) if _naver_error_dir.exists() else []
+
+    if not _error_shots:
+        st.markdown('<div class="info-box">저장된 오류 스크린샷이 없습니다.</div>', unsafe_allow_html=True)
+    else:
+        st.caption(f"총 {len(_error_shots)}개 (최근순)")
+        for _shot in _error_shots:
+            with st.expander(_shot.name, expanded=(_shot == _error_shots[0])):
+                st.image(str(_shot), use_container_width=True)
+                if st.button("🗑️ 삭제", key=f"del_log_{_shot.name}"):
+                    _shot.unlink()
+                    st.rerun()
 
 # ════════════════════════════════════════════════════════
 # 매뉴얼
