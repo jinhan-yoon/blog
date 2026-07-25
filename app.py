@@ -25,9 +25,10 @@ if _auth_configured():
 
     if not st.session_state.authenticated_email:
         _code = st.query_params.get("code")
+        _state = st.query_params.get("state", "")
         if _code:
             try:
-                st.session_state.authenticated_email = complete_login(_code, APP_BASE_URL)
+                st.session_state.authenticated_email = complete_login(_code, APP_BASE_URL, _state)
                 st.query_params.clear()
                 st.rerun()
             except Exception as e:
