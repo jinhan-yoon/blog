@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import time
 import base64
 import hashlib
 import secrets
@@ -25,30 +24,6 @@ os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 # (st.session_state로는 못 들고 다님), PKCE code_verifier를 state 값 기준으로
 # 서버 메모리에 잠깐 보관해 콜백에서 다시 꺼내 쓴다. 이 앱은 단일 프로세스로만 돌아가므로 충분함.
 _pending_verifiers: dict[str, str] = {}
-
-# 팝업 로그인 창에서 인증이 끝나면 원래 탭(별도 세션)도 자동으로 통과시켜야 하는데,
-# Streamlit의 session_state는 탭(세션)마다 독립적이라 팝업의 인증 결과를 원래 탭이 알 수 없다.
-# 이 앱은 허용 이메일이 1개뿐인 개인용 도구라는 전제 하에, 로그인 성공 시 서버 전체에
-# 임시로 통행증을 발급하는 방식으로 단순화한다 (만료 시간 있음 — 무기한 아님).
-GLOBAL_AUTH_TTL_SECONDS = 24 * 60 * 60  # 24시간
-_global_auth: dict = {"email": None, "expires_at": 0.0}
-
-
-def check_global_auth() -> str | None:
-    """서버 전체 임시 인증이 유효하면 이메일 반환, 아니면 None"""
-    if _global_auth["email"] and time.time() < _global_auth["expires_at"]:
-        return _global_auth["email"]
-    return None
-
-
-def set_global_auth(email: str) -> None:
-    _global_auth["email"] = email
-    _global_auth["expires_at"] = time.time() + GLOBAL_AUTH_TTL_SECONDS
-
-
-def clear_global_auth() -> None:
-    _global_auth["email"] = None
-    _global_auth["expires_at"] = 0.0
 
 
 def is_configured() -> bool:

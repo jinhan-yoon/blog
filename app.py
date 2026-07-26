@@ -15,14 +15,7 @@ st.set_page_config(
 )
 
 # ── 구글 로그인 게이트 ────────────────────────────────────────────────────────
-import streamlit.components.v1 as components
-from modules.app_auth import (
-    is_configured as _auth_configured,
-    get_login_url,
-    complete_login,
-    check_global_auth,
-    set_global_auth,
-)
+from modules.app_auth import is_configured as _auth_configured, get_login_url, complete_login
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://blog.superip.net")
 
@@ -30,62 +23,21 @@ if _auth_configured():
     if "authenticated_email" not in st.session_state:
         st.session_state.authenticated_email = None
 
-    # 팝업 창에서 로그인이 이미 끝났다면(서버 전체 임시 인증), 이 탭도 바로 통과
-    if not st.session_state.authenticated_email:
-        _global_email = check_global_auth()
-        if _global_email:
-            st.session_state.authenticated_email = _global_email
-
     if not st.session_state.authenticated_email:
         _code = st.query_params.get("code")
         _state = st.query_params.get("state", "")
         if _code:
             try:
-                _email = complete_login(_code, APP_BASE_URL, _state)
-                st.session_state.authenticated_email = _email
-                set_global_auth(_email)
+                st.session_state.authenticated_email = complete_login(_code, APP_BASE_URL, _state)
                 st.query_params.clear()
-                st.success("✅ 로그인 완료!")
-                # 팝업으로 열린 창이면 스스로 닫기 시도 — 모바일 브라우저는 스크립트로
-                # 창을 못 닫는 경우가 많아, 자동으로 안 닫히면 수동 버튼도 함께 제공
-                components.html("""
-                    <div style="font-family:sans-serif;">
-                      <p>이 창은 이제 닫으셔도 됩니다. 원래 탭으로 돌아가 주세요.</p>
-                      <button onclick="window.close()" style="padding:10px 20px; font-size:15px; cursor:pointer;">
-                        이 창 닫기
-                      </button>
-                    </div>
-                    <script>if (window.opener) { window.close(); }</script>
-                """, height=100)
+                st.rerun()
             except Exception as e:
                 st.query_params.clear()
                 st.error(f"❌ 로그인 실패: {e}")
-            st.stop()
+                st.stop()
         else:
             st.title("🔒 로그인이 필요합니다")
-            _login_url = get_login_url(APP_BASE_URL)
-            components.html(f"""
-                <div style="display:flex; justify-content:flex-start; font-family:sans-serif;">
-                  <button id="loginBtn" style="padding:14px 28px; font-size:16px; cursor:pointer;
-                    background:#4285F4; color:white; border:none; border-radius:6px;">
-                    🔑 구글 계정으로 로그인
-                  </button>
-                </div>
-                <script>
-                  document.getElementById('loginBtn').onclick = function() {{
-                    const popup = window.open("{_login_url}", "google_login", "width=520,height=680");
-                    const timer = setInterval(function() {{
-                      if (!popup || popup.closed) {{
-                        clearInterval(timer);
-                        window.location.reload();
-                      }}
-                    }}, 500);
-                  }};
-                </script>
-            """, height=80)
-            st.caption("팝업 창에서 로그인 후 자동으로 넘어가지 않으면(모바일 브라우저 등) 아래 버튼을 눌러주세요.")
-            if st.button("🔄 로그인 완료했어요 — 새로고침"):
-                st.rerun()
+            st.markdown(f"[🔑 구글 계정으로 로그인]({get_login_url(APP_BASE_URL)})")
             st.stop()
 
 # ── 페이지 정의 ──────────────────────────────────────────────────────────────
@@ -261,9 +213,7 @@ if st.session_state.get("authenticated_email"):
         with st.popover(f"👤 {st.session_state.authenticated_email.split('@')[0]}", use_container_width=True):
             st.caption(st.session_state.authenticated_email)
             if st.button("🚪 로그아웃", use_container_width=True, key="logout_top"):
-                from modules.app_auth import clear_global_auth
                 st.session_state.authenticated_email = None
-                clear_global_auth()
                 st.rerun()
 
 # ════════════════════════════════════════════════════════
