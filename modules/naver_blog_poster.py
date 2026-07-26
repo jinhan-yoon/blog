@@ -146,13 +146,27 @@ def _login(page, log_callback=None) -> None:
 _pending_logins: dict[str, dict] = {}
 
 
+def _has_solvable_challenge(page) -> bool:
+    """
+    실제로 답할 수 있는 캡차/추가 인증 화면인지 확인.
+    네이버는 자동화를 의심하면 아무 문구·입력칸 없이 그냥 빈 로그인 폼으로 조용히
+    돌려보내는 경우가 있는데, 이건 답할 캡차가 없으므로 구분해야 한다.
+    """
+    try:
+        body_text = page.inner_text("body")
+    except Exception:
+        return False
+    return any(k in body_text for k in ("캡차", "영수증", "빈 칸", "추가 확인", "인증번호"))
+
+
 def start_interactive_login() -> dict:
     """
     앱 화면에서 네이버 로그인을 시작. ID/PW를 자동 입력하고 제출한다.
     바로 성공하면 {"status": "success"}.
-    캡차 등 추가 인증이 뜨면 {"status": "challenge", "session_id": str, "screenshot": bytes}
+    캡차 등 실제로 답할 수 있는 추가 인증이 뜨면
+    {"status": "challenge", "session_id": str, "screenshot": bytes}
     (브라우저는 살려둔 채 반환 — submit_login_challenge()로 이어서 처리).
-    실패하면 {"status": "error", "message": str}.
+    실패(캡차 없이 조용히 차단된 경우 포함)하면 {"status": "error", "message": str, "screenshot": bytes|None}.
     """
     from playwright.sync_api import sync_playwright
 
@@ -175,10 +189,25 @@ def start_interactive_login() -> dict:
             p.stop()
             return {"status": "success"}
 
-        session_id = secrets.token_urlsafe(12)
+        if _has_solvable_challenge(page):
+            session_id = secrets.token_urlsafe(12)
+            screenshot = page.screenshot(full_page=True)
+            _pending_logins[session_id] = {"playwright": p, "browser": browser, "context": context, "page": page}
+            return {"status": "challenge", "session_id": session_id, "screenshot": screenshot}
+
+        # 캡차 문구·입력칸 없이 그냥 로그인 페이지에 머무름 — 조용한 자동화 차단으로 판단
         screenshot = page.screenshot(full_page=True)
-        _pending_logins[session_id] = {"playwright": p, "browser": browser, "context": context, "page": page}
-        return {"status": "challenge", "session_id": session_id, "screenshot": screenshot}
+        browser.close()
+        p.stop()
+        return {
+            "status": "error",
+            "message": (
+                "캡차 없이 로그인 페이지에 그대로 머물러 있습니다 — 네이버가 자동화를 의심해 "
+                "조용히 차단한 것으로 보입니다. 이 경우 GUI가 있는 PC에서 "
+                "`python naver_setup.py`로 수동 로그인 후 세션 파일을 서버로 옮기는 방법을 권장합니다."
+            ),
+            "screenshot": screenshot,
+        }
 
     except Exception as e:
         try:
@@ -236,9 +265,18 @@ def submit_login_challenge(session_id: str, answer: str) -> dict:
             _cleanup()
             return {"status": "success"}
 
-        # 여전히 로그인 페이지 — 재도전 화면이거나 실패, 최신 화면을 다시 보여줌
+        if _has_solvable_challenge(page):
+            # 여전히 로그인 페이지 — 재도전 화면으로 판단, 최신 화면을 다시 보여줌
+            screenshot = page.screenshot(full_page=True)
+            return {"status": "challenge", "session_id": session_id, "screenshot": screenshot}
+
         screenshot = page.screenshot(full_page=True)
-        return {"status": "challenge", "session_id": session_id, "screenshot": screenshot}
+        _cleanup()
+        return {
+            "status": "error",
+            "message": "정답이 틀렸거나 추가로 조용히 차단된 것으로 보입니다. 다시 시도해주세요.",
+            "screenshot": screenshot,
+        }
 
     except Exception as e:
         _cleanup()

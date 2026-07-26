@@ -1055,6 +1055,8 @@ elif cur == "settings":
 
         elif _login_state.get("status") == "error":
             st.error(f"로그인 실패: {_login_state.get('message')}")
+            if _login_state.get("screenshot"):
+                st.image(_login_state["screenshot"])
             if st.button("다시 시도", key="naver_login_retry", use_container_width=True):
                 st.session_state.naver_login_state = None
                 st.rerun()
