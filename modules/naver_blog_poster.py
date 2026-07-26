@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
+import secrets
 from datetime import datetime
 from pathlib import Path
 import requests
@@ -76,15 +77,8 @@ def new_context(browser, storage_state: str | None = None):
 
 # ── 로그인 ────────────────────────────────────────────────────────────────
 
-def _login(page, log_callback=None) -> None:
-    """NAVER_ID/NAVER_PW로 자동 로그인 시도. 캡차·2단계 인증 시 예외 발생."""
-    _log(log_callback, "네이버 자동 로그인 시도 중...")
-
-    naver_id = os.getenv("NAVER_ID", "")
-    naver_pw = os.getenv("NAVER_PW", "")
-    if not naver_id or not naver_pw:
-        raise RuntimeError("NAVER_ID / NAVER_PW가 .env에 설정되지 않았습니다.")
-
+def _fill_and_submit_login(page, naver_id: str, naver_pw: str) -> None:
+    """로그인 폼에 ID/PW를 입력하고 로그인 버튼을 클릭 (제출 결과는 호출자가 판단)"""
     page.goto(LOGIN_URL, wait_until="domcontentloaded")
     page.wait_for_selector("#id", timeout=15000)
 
@@ -113,6 +107,18 @@ def _login(page, log_callback=None) -> None:
 
     page.wait_for_load_state("networkidle", timeout=15000)
 
+
+def _login(page, log_callback=None) -> None:
+    """NAVER_ID/NAVER_PW로 자동 로그인 시도. 캡차·2단계 인증 시 예외 발생."""
+    _log(log_callback, "네이버 자동 로그인 시도 중...")
+
+    naver_id = os.getenv("NAVER_ID", "")
+    naver_pw = os.getenv("NAVER_PW", "")
+    if not naver_id or not naver_pw:
+        raise RuntimeError("NAVER_ID / NAVER_PW가 .env에 설정되지 않았습니다.")
+
+    _fill_and_submit_login(page, naver_id, naver_pw)
+
     if "nidlogin" in page.url:
         try:
             body_text = page.inner_text("body")
@@ -131,6 +137,112 @@ def _login(page, log_callback=None) -> None:
         raise RuntimeError(msg)
 
     _log(log_callback, "✅ 네이버 로그인 성공")
+
+
+# ── 앱 내 대화형 로그인 (캡차를 화면에 보여주고 답을 입력받는 방식) ────────────
+# Streamlit은 매 상호작용마다 스크립트를 처음부터 다시 실행하므로, 캡차 답을
+# 기다리는 동안 살아있어야 하는 Playwright 브라우저를 세션 토큰 기준으로
+# 서버 메모리에 보관해두고 다음 제출 때 다시 찾아 쓴다.
+_pending_logins: dict[str, dict] = {}
+
+
+def start_interactive_login() -> dict:
+    """
+    앱 화면에서 네이버 로그인을 시작. ID/PW를 자동 입력하고 제출한다.
+    바로 성공하면 {"status": "success"}.
+    캡차 등 추가 인증이 뜨면 {"status": "challenge", "session_id": str, "screenshot": bytes}
+    (브라우저는 살려둔 채 반환 — submit_login_challenge()로 이어서 처리).
+    실패하면 {"status": "error", "message": str}.
+    """
+    from playwright.sync_api import sync_playwright
+
+    naver_id = os.getenv("NAVER_ID", "")
+    naver_pw = os.getenv("NAVER_PW", "")
+    if not naver_id or not naver_pw:
+        return {"status": "error", "message": "NAVER_ID / NAVER_PW가 .env에 설정되지 않았습니다."}
+
+    p = sync_playwright().start()
+    browser = p.chromium.launch(headless=True, args=LAUNCH_ARGS)
+    context = new_context(browser)
+    page = context.new_page()
+
+    try:
+        _fill_and_submit_login(page, naver_id, naver_pw)
+
+        if "nidlogin" not in page.url:
+            context.storage_state(path=str(SESSION_PATH))
+            browser.close()
+            p.stop()
+            return {"status": "success"}
+
+        session_id = secrets.token_urlsafe(12)
+        screenshot = page.screenshot(full_page=True)
+        _pending_logins[session_id] = {"playwright": p, "browser": browser, "context": context, "page": page}
+        return {"status": "challenge", "session_id": session_id, "screenshot": screenshot}
+
+    except Exception as e:
+        try:
+            browser.close()
+        except Exception:
+            pass
+        p.stop()
+        return {"status": "error", "message": str(e)}
+
+
+def cancel_login_challenge(session_id: str) -> None:
+    """대기 중인 로그인 시도를 취소하고 브라우저 리소스 정리"""
+    state = _pending_logins.pop(session_id, None)
+    if not state:
+        return
+    try:
+        state["browser"].close()
+    except Exception:
+        pass
+    state["playwright"].stop()
+
+
+def submit_login_challenge(session_id: str, answer: str) -> dict:
+    """
+    캡차 등 추가 인증 화면에 사용자가 입력한 답을 제출하고 결과를 반환.
+    반환 형식은 start_interactive_login()과 동일.
+    """
+    state = _pending_logins.get(session_id)
+    if not state:
+        return {"status": "error", "message": "로그인 세션이 만료되었습니다. 처음부터 다시 시도해주세요."}
+
+    page, context, browser, p = state["page"], state["context"], state["browser"], state["playwright"]
+
+    def _cleanup():
+        _pending_logins.pop(session_id, None)
+        try:
+            browser.close()
+        except Exception:
+            pass
+        p.stop()
+
+    try:
+        # 캡차 정답 입력칸으로 추정되는, 화면에 보이는 마지막 텍스트 입력을 사용
+        answer_input = page.locator("input[type='text'], input:not([type])").last
+        answer_input.wait_for(state="visible", timeout=5000)
+        answer_input.click()
+        page.keyboard.type(answer, delay=50)
+
+        confirm_btn = page.locator("button:has-text('확인')").first
+        confirm_btn.click()
+        page.wait_for_load_state("networkidle", timeout=15000)
+
+        if "nidlogin" not in page.url:
+            context.storage_state(path=str(SESSION_PATH))
+            _cleanup()
+            return {"status": "success"}
+
+        # 여전히 로그인 페이지 — 재도전 화면이거나 실패, 최신 화면을 다시 보여줌
+        screenshot = page.screenshot(full_page=True)
+        return {"status": "challenge", "session_id": session_id, "screenshot": screenshot}
+
+    except Exception as e:
+        _cleanup()
+        return {"status": "error", "message": str(e)}
 
 
 def _is_logged_in(context) -> bool:

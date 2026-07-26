@@ -1054,12 +1054,52 @@ elif cur == "settings":
         _nstat = _naver_status()
         st.write(f"{'✅' if _nstat['session'] else '⚠️'} naver_session.json "
                  f"{'(로그인 세션 있음)' if _nstat['session'] else '(로그인 필요)'}")
-        if not _nstat["session"]:
-            st.markdown(
-                '<div class="warn-box">⚠️ 설정 저장 후 터미널에서 <code>python naver_setup.py</code>를 '
-                '실행해 최초 1회 수동 로그인을 완료해주세요.</div>',
-                unsafe_allow_html=True,
-            )
+
+        st.markdown("**앱에서 바로 로그인**")
+        if "naver_login_state" not in st.session_state:
+            st.session_state.naver_login_state = None
+        _login_state = st.session_state.naver_login_state
+
+        if _login_state is None:
+            if st.button("🔑 네이버 로그인 시작", use_container_width=True,
+                         disabled=not (naver_id and naver_pw)):
+                from modules.naver_blog_poster import start_interactive_login
+                with st.spinner("로그인 시도 중..."):
+                    st.session_state.naver_login_state = start_interactive_login()
+                st.rerun()
+            if not (naver_id and naver_pw):
+                st.caption("먼저 위 아이디/비밀번호를 입력하고 저장해주세요.")
+
+        elif _login_state.get("status") == "challenge":
+            st.warning("추가 인증(캡차 등)이 필요합니다. 아래 화면을 보고 답을 입력해주세요.")
+            st.image(_login_state["screenshot"])
+            _answer = st.text_input("정답 입력", key="naver_captcha_answer")
+            if st.button("제출", use_container_width=True, type="primary"):
+                from modules.naver_blog_poster import submit_login_challenge
+                with st.spinner("확인 중..."):
+                    st.session_state.naver_login_state = submit_login_challenge(
+                        _login_state["session_id"], _answer
+                    )
+                st.rerun()
+            if st.button("취소", use_container_width=True):
+                from modules.naver_blog_poster import cancel_login_challenge
+                cancel_login_challenge(_login_state["session_id"])
+                st.session_state.naver_login_state = None
+                st.rerun()
+
+        elif _login_state.get("status") == "success":
+            st.success("✅ 네이버 로그인 성공! 세션이 저장되었습니다.")
+            if st.button("확인", key="naver_login_ack", use_container_width=True):
+                st.session_state.naver_login_state = None
+                st.rerun()
+
+        elif _login_state.get("status") == "error":
+            st.error(f"로그인 실패: {_login_state.get('message')}")
+            if st.button("다시 시도", key="naver_login_retry", use_container_width=True):
+                st.session_state.naver_login_state = None
+                st.rerun()
+
+        st.caption("위 방식이 안 되면 터미널에서 `python naver_setup.py`로 수동 로그인도 가능합니다.")
 
         st.divider()
 
