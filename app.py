@@ -45,11 +45,18 @@ if _auth_configured():
                 st.session_state.authenticated_email = _email
                 set_global_auth(_email)
                 st.query_params.clear()
-                st.success("✅ 로그인 완료! 이 창은 자동으로 닫힙니다.")
-                # 팝업으로 열린 창이면 스스로 닫아 원래 탭으로 돌아가게 함
-                components.html(
-                    "<script>if (window.opener) { window.close(); }</script>", height=0
-                )
+                st.success("✅ 로그인 완료!")
+                # 팝업으로 열린 창이면 스스로 닫기 시도 — 모바일 브라우저는 스크립트로
+                # 창을 못 닫는 경우가 많아, 자동으로 안 닫히면 수동 버튼도 함께 제공
+                components.html("""
+                    <div style="font-family:sans-serif;">
+                      <p>이 창은 이제 닫으셔도 됩니다. 원래 탭으로 돌아가 주세요.</p>
+                      <button onclick="window.close()" style="padding:10px 20px; font-size:15px; cursor:pointer;">
+                        이 창 닫기
+                      </button>
+                    </div>
+                    <script>if (window.opener) { window.close(); }</script>
+                """, height=100)
             except Exception as e:
                 st.query_params.clear()
                 st.error(f"❌ 로그인 실패: {e}")
@@ -76,6 +83,9 @@ if _auth_configured():
                   }};
                 </script>
             """, height=80)
+            st.caption("팝업 창에서 로그인 후 자동으로 넘어가지 않으면(모바일 브라우저 등) 아래 버튼을 눌러주세요.")
+            if st.button("🔄 로그인 완료했어요 — 새로고침"):
+                st.rerun()
             st.stop()
 
 # ── 페이지 정의 ──────────────────────────────────────────────────────────────
