@@ -20,6 +20,7 @@ _HEADERS = {
 
 # ── 개별 프로바이더 ──────────────────────────────────────────────────────────
 # 모든 프로바이더는 AI로 신규 생성된 이미지만 반환 — 저작권자가 있는 실사진(스톡 사진)은 쓰지 않음
+# (get_image_options*는 예외: Openverse에서 상업적 이용/수정이 허용된 CC 라이선스 이미지만 옵션으로 추가 제공)
 
 def _pollinations_url(prompt: str) -> str:
     safe = quote(f"blog post illustration: {prompt}, professional, clean, modern style")
@@ -199,6 +200,84 @@ def generate_images_for_post(
                 "error": str(e),
             })
 
+    return results
+
+
+def _search_openverse(prompt: str, count: int = 3) -> list[dict]:
+    """Openverse API로 무료(CC 라이선스) 스톡 이미지 검색 (API 키 불필요)"""
+    url = "https://api.openverse.org/v1/images/"
+    params = {
+        "q": prompt,
+        "page_size": count,
+        "license_type": "commercial,modification",
+        "orientation": "landscape",
+    }
+    resp = requests.get(url, params=params, timeout=20, headers=_HEADERS)
+    resp.raise_for_status()
+    data = resp.json()
+
+    results = []
+    for item in data.get("results", [])[:count]:
+        img_url = item.get("url") or item.get("thumbnail")
+        if not img_url:
+            continue
+        results.append({
+            "url": img_url,
+            "title": item.get("title") or prompt,
+            "creator": item.get("creator", ""),
+            "license": (item.get("license") or "").upper(),
+            "source": "openverse",
+        })
+    return results
+
+
+def get_image_options(prompt: str, provider: str | None = None) -> dict:
+    """
+    한 슬롯에 대해 AI 생성 이미지 1개 + 무료 스톡 이미지(Openverse) 최대 3개를 함께 반환.
+    사용자가 UI에서 이 중 하나를 골라 쓸 수 있도록 옵션만 준비한다.
+
+    Returns:
+        {
+            "prompt": str,
+            "ai": {"bytes": bytes|None, "url": str|None, "provider": str|None, "error": str|None},
+            "free": [{"url", "title", "creator", "license", "source"}, ...],
+        }
+    """
+    ai_result = {"bytes": None, "url": None, "provider": None, "error": None}
+    try:
+        data, used_provider = generate_image_bytes(prompt, provider)
+        ai_result["bytes"] = data
+        ai_result["provider"] = used_provider
+        ai_result["url"] = get_image_url(prompt)
+    except Exception as e:
+        ai_result["error"] = str(e)
+
+    try:
+        free_images = _search_openverse(prompt, count=3)
+    except Exception as e:
+        print(f"⚠️ Openverse 검색 실패: {e}")
+        free_images = []
+
+    return {"prompt": prompt, "ai": ai_result, "free": free_images}
+
+
+def get_image_options_for_post(
+    image_prompts: list[str],
+    provider: str | None = None,
+    log_callback=None,
+) -> list[dict]:
+    """3개 슬롯 각각에 대해 AI 이미지 + 무료 이미지 옵션을 준비 (사용자 선택용, 자동 삽입 없음)."""
+    prompts = (image_prompts or ["blog post illustration", "relevant image", "article image"])[:3]
+    while len(prompts) < 3:
+        prompts.append(f"Blog illustration #{len(prompts)+1}")
+
+    results = []
+    for i, prompt in enumerate(prompts):
+        msg = f"이미지 {i+1}/3 옵션 준비 중 (AI + 무료 이미지): {prompt[:40]}..."
+        if log_callback:
+            log_callback(msg)
+        print(msg)
+        results.append(get_image_options(prompt, provider))
     return results
 
 

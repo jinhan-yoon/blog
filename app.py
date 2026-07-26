@@ -132,6 +132,7 @@ def init_session():
         "post_meta_desc":     "",
         "post_tags":          [],
         "image_prompts":      [],
+        "image_options":      [],
         "topics":             None,
         "image_urls":         [],
         "image_data":         [],
@@ -541,12 +542,12 @@ elif cur == "media":
         st.divider()
         col1, col2, col3 = st.columns([2, 1, 1])
         with col2:
-            gen_img_btn = st.button("🖼️ 이미지 생성 & 삽입", type="primary", use_container_width=True)
+            gen_opt_btn = st.button("🖼️ 이미지 옵션 생성", type="primary", use_container_width=True)
         with col3:
             skip_btn = st.button("⏭️ 이미지 건너뛰기", use_container_width=True)
 
-        if gen_img_btn:
-            from modules.image_generator import generate_images_for_post, insert_images_into_html
+        if gen_opt_btn:
+            from modules.image_generator import get_image_options_for_post
 
             log_area = st.empty()
             log_lines = []
@@ -555,21 +556,11 @@ elif cur == "media":
                 log_area.markdown("\n\n".join(log_lines))
 
             prompts = st.session_state.image_prompts[:3]
-            with st.spinner(f"이미지 3개 생성 중... ({provider})"):
+            with st.spinner(f"AI 이미지 생성 + 무료 이미지 검색 중... ({provider})"):
                 try:
-                    results = generate_images_for_post(prompts, provider, log_callback=_log)
-                    st.session_state.image_data = results
-                    st.session_state.final_html = insert_images_into_html(
-                        st.session_state.post_content_html, results
-                    )
-                    success_count = sum(1 for r in results if r.get("bytes"))
-                    if success_count > 0:
-                        st.success(f"✅ 이미지 {success_count}/3개 생성 완료!")
-                    else:
-                        st.error("❌ 이미지 생성 실패. 아래 오류를 확인하거나 다른 방식을 선택하세요.")
-                        for r in results:
-                            if r.get("error"):
-                                st.code(r["error"])
+                    st.session_state.image_options = get_image_options_for_post(prompts, provider, log_callback=_log)
+                    st.session_state.image_data = []
+                    st.session_state.final_html = ""
                 except Exception as e:
                     st.error(f"❌ 오류: {e}")
             st.rerun()
@@ -577,25 +568,112 @@ elif cur == "media":
         if skip_btn:
             st.session_state.final_html = st.session_state.post_content_html
             st.session_state.image_data = []
+            st.session_state.image_options = []
             st.session_state.current_page = "publish"
             st.rerun()
 
-        # ── 결과 미리보기 ────────────────────────────────────────────────────
-        if st.session_state.get("image_data"):
+        # ── 옵션 중 선택 (AI 생성 이미지 + 무료 이미지 3개) ──────────────────────
+        if st.session_state.get("image_options"):
             st.divider()
-            st.markdown("**생성된 이미지 미리보기:**")
+            st.markdown("**슬롯마다 AI 생성 이미지와 무료 이미지 중 사용할 것을 하나씩 선택하세요:**")
+
+            for i, opt in enumerate(st.session_state.image_options):
+                st.markdown(f"**슬롯 {i+1} — _{opt['prompt']}_**")
+
+                choices = []          # (label, kind, data)
+                ai = opt.get("ai") or {}
+                if ai.get("bytes") or ai.get("url"):
+                    choices.append((f"AI 생성 ({ai.get('provider') or provider})", "ai", ai))
+                for j, free in enumerate(opt.get("free") or []):
+                    choices.append((f"무료 이미지 {j+1} ({free.get('license') or 'CC'})", "free", free))
+
+                if not choices:
+                    st.error("이 슬롯에는 사용할 수 있는 이미지가 없습니다.")
+                    if ai.get("error"):
+                        st.caption(ai["error"][:150])
+                    st.divider()
+                    continue
+
+                thumb_cols = st.columns(len(choices))
+                for col, (label, kind, data) in zip(thumb_cols, choices):
+                    with col:
+                        if kind == "ai":
+                            if data.get("bytes"):
+                                st.image(data["bytes"], use_container_width=True)
+                            elif data.get("url"):
+                                st.image(data["url"], use_container_width=True)
+                        else:
+                            st.image(data["url"], use_container_width=True)
+                            if data.get("creator"):
+                                st.caption(f"by {data['creator']}")
+                        st.caption(label)
+
+                sel_key = f"img_choice_{i}"
+                labels = [c[0] for c in choices]
+                st.radio("사용할 이미지", labels, key=sel_key, index=0, label_visibility="collapsed")
+                st.divider()
+
+            if st.button("✅ 선택한 이미지로 삽입", type="primary", use_container_width=True):
+                from modules.image_generator import insert_images_into_html
+
+                selected = []
+                for i, opt in enumerate(st.session_state.image_options):
+                    ai = opt.get("ai") or {}
+                    choices = []
+                    if ai.get("bytes") or ai.get("url"):
+                        choices.append((f"AI 생성 ({ai.get('provider') or provider})", "ai", ai))
+                    for j, free in enumerate(opt.get("free") or []):
+                        choices.append((f"무료 이미지 {j+1} ({free.get('license') or 'CC'})", "free", free))
+
+                    chosen_label = st.session_state.get(f"img_choice_{i}")
+                    kind, data = next(((k, d) for (l, k, d) in choices if l == chosen_label), (None, None))
+
+                    if kind == "ai":
+                        selected.append({
+                            "bytes": data.get("bytes"),
+                            "url": data.get("url"),
+                            "provider": data.get("provider"),
+                            "prompt": opt["prompt"],
+                            "error": None,
+                        })
+                    elif kind == "free":
+                        selected.append({
+                            "bytes": None,
+                            "url": data.get("url"),
+                            "provider": f"free:{data.get('source', 'openverse')}",
+                            "prompt": opt["prompt"],
+                            "attribution": f"{data.get('title', '')} by {data.get('creator', '')} ({data.get('license', '')})",
+                            "error": None,
+                        })
+                    else:
+                        selected.append({"bytes": None, "url": None, "provider": None, "prompt": opt["prompt"], "error": "선택 없음"})
+
+                st.session_state.image_data = selected
+                st.session_state.final_html = insert_images_into_html(
+                    st.session_state.post_content_html, selected
+                )
+                st.success("✅ 선택한 이미지를 본문에 삽입했습니다!")
+                st.rerun()
+
+        # ── 결과 미리보기 ────────────────────────────────────────────────────
+        if st.session_state.get("image_data") and st.session_state.get("final_html"):
+            st.divider()
+            st.markdown("**삽입된 이미지 미리보기:**")
             cols = st.columns(3)
             for i, item in enumerate(st.session_state.image_data):
                 with cols[i]:
                     if item.get("bytes"):
                         st.image(item["bytes"], caption=f"이미지 {i+1} ({item.get('provider','')})",
                                  use_container_width=True)
+                    elif item.get("url"):
+                        st.image(item["url"], caption=f"이미지 {i+1} ({item.get('provider','')})",
+                                 use_container_width=True)
                     else:
                         st.error(f"이미지 {i+1} 실패")
                         if item.get("error"):
                             st.caption(item["error"][:100])
 
-            success_count = sum(1 for r in st.session_state.image_data if r.get("bytes"))
+            success_count = sum(1 for r in st.session_state.image_data if r.get("bytes") or r.get("url"))
             if success_count > 0:
                 st.divider()
                 _, col2 = st.columns([3, 1])
@@ -1320,8 +1398,9 @@ elif cur == "manual":
 <div class="tech-card">
 - 이미지 생성 방식 선택 (Pollinations 권장)<br>
 - 이미지 프롬프트 3개 확인·수정 (영어 권장)<br>
-- <b>🖼️ 이미지 생성 & 삽입</b>: 이미지 3개 자동 생성 후 본문에 삽입<br>
-- 실패 시에도 저작권 있는 실사진 대신 Pollinations AI 생성 이미지로만 대체
+- <b>🖼️ 이미지 옵션 생성</b>: 슬롯마다 AI 생성 이미지 1개 + 무료 이미지(Openverse CC 라이선스) 최대 3개를 함께 준비<br>
+- 슬롯별로 원하는 이미지를 하나씩 골라 <b>✅ 선택한 이미지로 삽입</b><br>
+- 무료 이미지는 상업적 이용·수정이 허용된 CC 라이선스만 사용해 저작권 문제 없음
 </div>
         """, unsafe_allow_html=True)
 
