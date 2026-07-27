@@ -77,7 +77,11 @@ def _read_session_email() -> str | None:
     return verify_session_token(unquote(cookie_val))
 
 
-if _auth_configured():
+# 구글 OAuth 로그인이 계속 invalid_grant로 실패해서(원인 미해결) 임시로 꺼둠.
+# 원인 파악되면 아래를 다시 `if _auth_configured():`로 되돌리면 됨.
+_LOGIN_GATE_ENABLED = False
+
+if _LOGIN_GATE_ENABLED and _auth_configured():
     if "authenticated_email" not in st.session_state:
         st.session_state.authenticated_email = None
 
