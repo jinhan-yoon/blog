@@ -37,7 +37,9 @@ if _auth_configured():
         st.session_state.authenticated_email = None
 
     if not st.session_state.authenticated_email:
-        _restored_email = verify_session_token(_cookie_ctl.get(SESSION_COOKIE_NAME))
+        # st.context.cookies는 최초 접속 요청 헤더에서 바로 읽어오므로(비동기 컴포넌트
+        # 왕복 불필요) 페이지를 새로고침해도 첫 실행부터 즉시 로그인 상태를 복원할 수 있다.
+        _restored_email = verify_session_token(st.context.cookies.get(SESSION_COOKIE_NAME))
         if _restored_email:
             st.session_state.authenticated_email = _restored_email
 
@@ -56,7 +58,11 @@ if _auth_configured():
                     same_site="lax",
                 )
                 st.query_params.clear()
-                st.rerun()
+                # 주의: 여기서 st.rerun()을 바로 호출하면 방금 마운트된 쿠키 저장
+                # 컴포넌트가 브라우저에 document.cookie를 쓰기도 전에 다음 스크립트
+                # 실행으로 교체되면서 쿠키 저장이 유실될 수 있음(레이스 컨디션).
+                # authenticated_email은 이미 세팅했으니 rerun 없이 그대로 아래로
+                # 흘러가게 둬서 같은 실행 안에서 앱 화면을 렌더링한다.
             except Exception as e:
                 st.query_params.clear()
                 st.error(f"❌ 로그인 실패: {e}")
