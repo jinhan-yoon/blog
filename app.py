@@ -15,10 +15,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 로그인/에러 화면을 포함해 모든 페이지에서 Streamlit 기본 메뉴(⋮)/툴바를 숨김
+# 로그인/에러 화면을 포함해 모든 페이지에서 Streamlit 기본 메뉴(⋮)/툴바를 숨김.
+# display:none으로 완전히 제거해 그 자리에 남는 여백까지 없애, 사이드바/본문이
+# 위쪽에 바짝 붙게 한다.
 # (아래쪽 CSS 블록은 로그인 게이트를 통과해야 실행되므로 여기 별도로 둠)
 st.markdown(
-    "<style>#MainMenu{visibility:hidden;} [data-testid=\"stToolbar\"]{visibility:hidden;}</style>",
+    "<style>"
+    "#MainMenu, [data-testid=\"stToolbar\"], header[data-testid=\"stHeader\"] "
+    "{ display:none !important; }"
+    "</style>",
     unsafe_allow_html=True,
 )
 
@@ -78,7 +83,11 @@ if _auth_configured():
                     same_site="lax",
                 )
                 st.query_params.clear()
-                st.rerun()
+                # 주의: 여기서 st.rerun()을 바로 부르면 방금 마운트된 쿠키 저장
+                # 컴포넌트가 브라우저에 document.cookie를 쓰기도 전에 다음 스크립트
+                # 실행으로 교체되면서 쿠키 저장 자체가 유실될 수 있다(레이스 컨디션).
+                # authenticated_email은 이미 세팅했으니 rerun 없이 그대로 아래로
+                # 흘러가게 둬서 같은 실행 안에서 앱 화면을 렌더링한다.
             except Exception as e:
                 st.query_params.clear()
                 # 인증 코드가 동시에 두 번 소비되는 경우(invalid_grant 등) —
@@ -128,8 +137,20 @@ PAGE_KEYS    = [p["key"] for p in PAGES]
 # (메뉴/툴바 숨김은 로그인 게이트 통과 전에도 적용되도록 위쪽에서 이미 처리함)
 st.markdown("""
 <style>
-/* ── 사이드바 ── */
+/* ── 사이드바: 위쪽 여백 없애고 좌상단에 바짝 붙임 ── */
 [data-testid="stSidebar"] { min-width: 230px; max-width: 260px; }
+[data-testid="stSidebar"] > div:first-child { padding-top: 0.75rem; }
+
+/* ── 본문 영역도 위쪽 여백 축소 ── */
+.block-container { padding-top: 1.5rem; }
+
+/* ── 우측 상단 계정 배지: 줄바꿈 없이 한 줄로 ── */
+div[data-testid="stPopover"] button {
+    white-space: nowrap;
+    display: inline-flex !important;
+    align-items: center;
+    width: auto !important;
+}
 
 /* ── 전체화면 로딩 모달 (st.spinner() 자동 적용) ── */
 [data-testid="stSpinner"] {
@@ -280,9 +301,9 @@ with st.sidebar:
 
 # ── 우측 상단 계정 표시 ───────────────────────────────────────────────────────
 if st.session_state.get("authenticated_email"):
-    _acc_l, _acc_r = st.columns([5, 1])
+    _acc_l, _acc_r = st.columns([8, 1])
     with _acc_r:
-        with st.popover(f"👤 {st.session_state.authenticated_email.split('@')[0]}", use_container_width=True):
+        with st.popover(f"👤 {st.session_state.authenticated_email.split('@')[0]}", use_container_width=False):
             st.caption(st.session_state.authenticated_email)
             if st.button("🚪 로그아웃", use_container_width=True, key="logout_top"):
                 st.session_state.authenticated_email = None
