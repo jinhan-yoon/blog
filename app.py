@@ -15,6 +15,13 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# 로그인/에러 화면을 포함해 모든 페이지에서 Streamlit 기본 메뉴(⋮)/툴바를 숨김
+# (아래쪽 CSS 블록은 로그인 게이트를 통과해야 실행되므로 여기 별도로 둠)
+st.markdown(
+    "<style>#MainMenu{visibility:hidden;} [data-testid=\"stToolbar\"]{visibility:hidden;}</style>",
+    unsafe_allow_html=True,
+)
+
 # ── 구글 로그인 게이트 ────────────────────────────────────────────────────────
 from modules.app_auth import (
     is_configured as _auth_configured,
@@ -81,7 +88,16 @@ if _auth_configured():
                 if _fallback_email:
                     st.session_state.authenticated_email = _fallback_email
                     st.rerun()
+                # st.query_params.clear()가 주소창에 반영되기 전에 사용자가
+                # 새로고침하면 죽은 code가 그대로 재사용돼 같은 오류가 반복될 수
+                # 있어, JS로 주소창의 ?code=...&state=... 을 확실히 지워준다.
+                import streamlit.components.v1 as _components
+                _components.html(
+                    "<script>window.history.replaceState(null, '', window.location.pathname);</script>",
+                    height=0,
+                )
                 st.error(f"❌ 로그인 실패: {e}")
+                st.markdown("🔄 새로고침하면 로그인 링크가 다시 표시됩니다.")
                 st.stop()
         else:
             st.title("🔒 로그인이 필요합니다")
@@ -109,12 +125,9 @@ PROCESS_KEYS = ["trends", "content", "media", "publish"]
 PAGE_KEYS    = [p["key"] for p in PAGES]
 
 # ── CSS ──────────────────────────────────────────────────────────────────────
+# (메뉴/툴바 숨김은 로그인 게이트 통과 전에도 적용되도록 위쪽에서 이미 처리함)
 st.markdown("""
 <style>
-/* ── 우측 상단 Streamlit 기본 메뉴(⋮)/배포 버튼 숨김 ── */
-#MainMenu { visibility: hidden; }
-[data-testid="stToolbar"] { visibility: hidden; }
-
 /* ── 사이드바 ── */
 [data-testid="stSidebar"] { min-width: 230px; max-width: 260px; }
 
