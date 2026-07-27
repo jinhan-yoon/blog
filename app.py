@@ -105,14 +105,23 @@ if _auth_configured():
                     "<script>window.history.replaceState(null, '', window.location.pathname);</script>",
                     height=0,
                 )
-                st.error(f"❌ 로그인 실패: {e}")
+                st.error(f"❌ 로그인 실패: {type(e).__name__}: {e}")
+                if getattr(e, "args", None):
+                    st.code(repr(e.args), language=None)
                 st.markdown("🔄 새로고침하면 로그인 링크가 다시 표시됩니다.")
                 st.stop()
         else:
             st.title("🔒 로그인이 필요합니다")
+            # get_login_url()은 호출할 때마다 새 state/code_verifier를 생성한다.
+            # 로그인 화면이 (쿠키 컴포넌트의 자동 rerun 등으로) 여러 번 다시
+            # 그려지는 동안 매번 새로 생성하면, 느린 네트워크에서 사용자가
+            # 예전 링크를 탭하는 순간과 실제 표시되는 링크가 어긋날 수 있어
+            # session_state에 한 번만 생성해 고정한다.
+            if "login_url" not in st.session_state:
+                st.session_state.login_url = get_login_url(APP_BASE_URL)
             # target="_self"를 명시해 새 탭/새 창이 아니라 현재 페이지에서 그대로 이동
             st.markdown(
-                f'<a href="{get_login_url(APP_BASE_URL)}" target="_self" '
+                f'<a href="{st.session_state.login_url}" target="_self" '
                 f'style="display:inline-block; padding:10px 18px; background:#4285F4; '
                 f'color:white; border-radius:8px; text-decoration:none; font-weight:600;">'
                 f'🔑 구글 계정으로 로그인</a>',
