@@ -15,17 +15,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# 로그인/에러 화면을 포함해 모든 페이지에서 Streamlit 기본 메뉴(⋮)/툴바를 숨김.
-# display:none으로 완전히 제거해 그 자리에 남는 여백까지 없애, 사이드바/본문이
-# 위쪽에 바짝 붙게 한다.
-# (아래쪽 CSS 블록은 로그인 게이트를 통과해야 실행되므로 여기 별도로 둠)
-st.markdown(
-    "<style>"
-    "#MainMenu, [data-testid=\"stToolbar\"], header[data-testid=\"stHeader\"] "
-    "{ display:none !important; }"
-    "</style>",
-    unsafe_allow_html=True,
-)
+# Streamlit 기본 메뉴(⋮)/Deploy 버튼 숨김은 .streamlit/config.toml의
+# toolbarMode="minimal"로 처리 (헤더 전체를 CSS로 숨기면 사이드바 접기/펼치기
+# 버튼까지 함께 사라져 사이드바가 안 열리는 문제가 있어 공식 설정으로 교체함)
 
 # ── 구글 로그인 게이트 ────────────────────────────────────────────────────────
 from modules.app_auth import (
@@ -142,7 +134,6 @@ PROCESS_KEYS = ["trends", "content", "media", "publish"]
 PAGE_KEYS    = [p["key"] for p in PAGES]
 
 # ── CSS ──────────────────────────────────────────────────────────────────────
-# (메뉴/툴바 숨김은 로그인 게이트 통과 전에도 적용되도록 위쪽에서 이미 처리함)
 st.markdown("""
 <style>
 /* ── 사이드바: 위쪽 여백 없애고 좌상단에 바짝 붙임 ── */
@@ -312,7 +303,6 @@ if st.session_state.get("authenticated_email"):
     _acc_l, _acc_r = st.columns([8, 1])
     with _acc_r:
         with st.popover(f"👤 {st.session_state.authenticated_email.split('@')[0]}", use_container_width=False):
-            st.caption(st.session_state.authenticated_email)
             if st.button("🚪 로그아웃", use_container_width=True, key="logout_top"):
                 st.session_state.authenticated_email = None
                 _cookie_ctl.remove(SESSION_COOKIE_NAME)
