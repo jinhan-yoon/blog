@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import base64
 import hashlib
+import hmac
+import time
 import secrets
 from pathlib import Path
 import requests
@@ -17,6 +19,57 @@ load_dotenv()
 SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 LOGIN_CLIENT_SECRET_PATH = Path("login_client_secret.json")
 USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
+
+# ── 로그인 세션 쿠키 (서버 재시작/재연결에도 로그인 유지) ──────────────────────
+SESSION_COOKIE_NAME = "blog_auth_token"
+SESSION_TTL_SECONDS = 30 * 24 * 3600  # 30일
+_SESSION_SECRET_PATH = Path(".session_secret")
+
+
+def _get_session_secret() -> bytes:
+    """쿠키 서명용 비밀키. .env의 APP_SESSION_SECRET을 쓰거나, 없으면 로컬 파일에 1회 생성해 재사용."""
+    env_secret = os.getenv("APP_SESSION_SECRET", "")
+    if env_secret:
+        return env_secret.encode()
+
+    if _SESSION_SECRET_PATH.exists():
+        return _SESSION_SECRET_PATH.read_text().strip().encode()
+
+    new_secret = secrets.token_urlsafe(32)
+    _SESSION_SECRET_PATH.write_text(new_secret)
+    return new_secret.encode()
+
+
+def make_session_token(email: str) -> str:
+    """로그인 성공 시 쿠키에 저장할 서명된 토큰 생성 (email + 만료시각 + HMAC 서명)."""
+    expires_at = int(time.time()) + SESSION_TTL_SECONDS
+    payload = f"{email}:{expires_at}"
+    sig = hmac.new(_get_session_secret(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}:{sig}"
+
+
+def verify_session_token(token: str | None) -> str | None:
+    """쿠키 토큰을 검증해 유효하면 이메일을, 아니면 None을 반환."""
+    if not token:
+        return None
+    try:
+        email, expires_at_s, sig = token.rsplit(":", 2)
+        expires_at = int(expires_at_s)
+    except (ValueError, TypeError):
+        return None
+
+    payload = f"{email}:{expires_at_s}"
+    expected_sig = hmac.new(_get_session_secret(), payload.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected_sig):
+        return None
+    if time.time() > expires_at:
+        return None
+
+    allowed = os.getenv("ALLOWED_GOOGLE_EMAIL", "").strip().lower()
+    if email.strip().lower() != allowed:
+        return None
+
+    return email
 
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 

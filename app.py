@@ -15,20 +15,46 @@ st.set_page_config(
 )
 
 # ── 구글 로그인 게이트 ────────────────────────────────────────────────────────
-from modules.app_auth import is_configured as _auth_configured, get_login_url, complete_login
+from modules.app_auth import (
+    is_configured as _auth_configured,
+    get_login_url,
+    complete_login,
+    make_session_token,
+    verify_session_token,
+    SESSION_COOKIE_NAME,
+    SESSION_TTL_SECONDS,
+)
+from streamlit_cookies_controller import CookieController
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://blog.superip.net")
+
+# 로그인 쿠키 컨트롤러 — 서버(Streamlit 세션)가 재시작되거나 재연결돼도
+# 브라우저 쿠키에 서명된 토큰이 남아있으면 재로그인 없이 자동 복원
+_cookie_ctl = CookieController(key="auth_cookies")
 
 if _auth_configured():
     if "authenticated_email" not in st.session_state:
         st.session_state.authenticated_email = None
 
     if not st.session_state.authenticated_email:
+        _restored_email = verify_session_token(_cookie_ctl.get(SESSION_COOKIE_NAME))
+        if _restored_email:
+            st.session_state.authenticated_email = _restored_email
+
+    if not st.session_state.authenticated_email:
         _code = st.query_params.get("code")
         _state = st.query_params.get("state", "")
         if _code:
             try:
-                st.session_state.authenticated_email = complete_login(_code, APP_BASE_URL, _state)
+                _email = complete_login(_code, APP_BASE_URL, _state)
+                st.session_state.authenticated_email = _email
+                _cookie_ctl.set(
+                    SESSION_COOKIE_NAME,
+                    make_session_token(_email),
+                    max_age=SESSION_TTL_SECONDS,
+                    secure=True,
+                    same_site="lax",
+                )
                 st.query_params.clear()
                 st.rerun()
             except Exception as e:
@@ -214,6 +240,7 @@ if st.session_state.get("authenticated_email"):
             st.caption(st.session_state.authenticated_email)
             if st.button("🚪 로그아웃", use_container_width=True, key="logout_top"):
                 st.session_state.authenticated_email = None
+                _cookie_ctl.remove(SESSION_COOKIE_NAME)
                 st.rerun()
 
 # ════════════════════════════════════════════════════════
