@@ -56,7 +56,15 @@ def _read_session_email() -> str | None:
         cookie_val = None
     if not cookie_val:
         cookie_val = _cookie_ctl.get(SESSION_COOKIE_NAME)
-    return verify_session_token(cookie_val)
+    if not cookie_val:
+        return None
+    # 쿠키 저장 시(streamlit_cookies_controller, universal-cookie 기반)
+    # "@", ":" 등이 URL-인코딩(%40, %3A)돼 들어가는데, st.context.cookies는
+    # 원본 요청 헤더 값을 그대로 주기 때문에 디코딩해줘야 email:exp:sig
+    # 형식으로 정상적으로 나뉜다. 이미 디코딩된 값이 들어와도 unquote는
+    # 안전한 무변화(no-op)라 두 경로 모두 안전하다.
+    from urllib.parse import unquote
+    return verify_session_token(unquote(cookie_val))
 
 
 if _auth_configured():
