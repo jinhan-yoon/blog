@@ -328,7 +328,13 @@ if st.session_state.get("authenticated_email"):
         with st.popover(f"👤 {st.session_state.authenticated_email.split('@')[0]}", use_container_width=False):
             if st.button("🚪 로그아웃", use_container_width=True, key="logout_top"):
                 st.session_state.authenticated_email = None
-                _cookie_ctl.remove(SESSION_COOKIE_NAME)
+                try:
+                    # 컨트롤러 내부 캐시에 쿠키가 아직 안 들어있으면(예: st.context.cookies로만
+                    # 읽고 이 컨트롤러의 getAll이 늦게 응답한 경우) dict.pop()이 KeyError를 던짐.
+                    # 브라우저 쪽 삭제 명령 자체는 이미 내려갔으므로 이 예외는 무시해도 된다.
+                    _cookie_ctl.remove(SESSION_COOKIE_NAME)
+                except KeyError:
+                    pass
                 st.rerun()
 
 # ════════════════════════════════════════════════════════
