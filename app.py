@@ -32,23 +32,26 @@ APP_BASE_URL = os.getenv("APP_BASE_URL", "https://blog.superip.net")
 # 브라우저 쿠키에 서명된 토큰이 남아있으면 재로그인 없이 자동 복원
 _cookie_ctl = CookieController(key="auth_cookies")
 
+def _read_session_email() -> str | None:
+    # st.context.cookies는 최초 요청 헤더에서 바로 읽으므로(비동기 컴포넌트
+    # 왕복이 필요한 _cookie_ctl.get()과 달리) 새로고침 직후 첫 실행부터 즉시
+    # 로그인 상태를 복원할 수 있다. 혹시 이 API를 못 쓰는 환경이면 조용히
+    # 실패시켜 기존 방식(_cookie_ctl)으로 자연스럽게 넘어가게 한다.
+    try:
+        cookie_val = st.context.cookies.get(SESSION_COOKIE_NAME)
+    except Exception:
+        cookie_val = None
+    if not cookie_val:
+        cookie_val = _cookie_ctl.get(SESSION_COOKIE_NAME)
+    return verify_session_token(cookie_val)
+
+
 if _auth_configured():
     if "authenticated_email" not in st.session_state:
         st.session_state.authenticated_email = None
 
     if not st.session_state.authenticated_email:
-        # st.context.cookies는 최초 요청 헤더에서 바로 읽으므로(비동기 컴포넌트
-        # 왕복이 필요한 _cookie_ctl.get()과 달리) 새로고침 직후 첫 실행부터 즉시
-        # 로그인 상태를 복원할 수 있다. 혹시 이 API를 못 쓰는 환경이면 조용히
-        # 실패시켜 기존 방식(_cookie_ctl)으로 자연스럽게 넘어가게 한다.
-        try:
-            _cookie_val = st.context.cookies.get(SESSION_COOKIE_NAME)
-        except Exception:
-            _cookie_val = None
-        if not _cookie_val:
-            _cookie_val = _cookie_ctl.get(SESSION_COOKIE_NAME)
-
-        _restored_email = verify_session_token(_cookie_val)
+        _restored_email = _read_session_email()
         if _restored_email:
             st.session_state.authenticated_email = _restored_email
 
@@ -70,6 +73,13 @@ if _auth_configured():
                 st.rerun()
             except Exception as e:
                 st.query_params.clear()
+                # 인증 코드가 동시에 두 번 소비되는 경우(invalid_grant 등) —
+                # 다른 쪽 시도가 이미 성공해 쿠키가 저장돼 있을 수 있으니
+                # 바로 에러를 띄우기 전에 한 번 더 확인해본다.
+                _fallback_email = _read_session_email()
+                if _fallback_email:
+                    st.session_state.authenticated_email = _fallback_email
+                    st.rerun()
                 st.error(f"❌ 로그인 실패: {e}")
                 st.stop()
         else:
