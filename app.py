@@ -77,6 +77,55 @@ def _read_session_email() -> str | None:
     return verify_session_token(unquote(cookie_val))
 
 
+# ── 비밀번호 로그인 게이트 (단순, 외부 서비스 의존성 없음) ──────────────────────
+# 구글 OAuth 로그인은 invalid_grant 원인 불명으로 계속 실패해서 대신 도입.
+from modules.app_auth import (
+    is_password_configured as _password_configured,
+    check_password,
+    make_password_session_token,
+    verify_password_session_token,
+)
+
+if _password_configured():
+    if "pw_authenticated" not in st.session_state:
+        st.session_state.pw_authenticated = False
+
+    if not st.session_state.pw_authenticated:
+        try:
+            _pw_cookie_val = st.context.cookies.get(SESSION_COOKIE_NAME)
+        except Exception:
+            _pw_cookie_val = None
+        if not _pw_cookie_val:
+            _pw_cookie_val = _cookie_ctl.get(SESSION_COOKIE_NAME)
+        if _pw_cookie_val:
+            from urllib.parse import unquote
+            if verify_password_session_token(unquote(_pw_cookie_val)):
+                st.session_state.pw_authenticated = True
+
+    if not st.session_state.pw_authenticated:
+        st.title("🔒 로그인이 필요합니다")
+        with st.form("password_login_form"):
+            _pw_input = st.text_input("비밀번호", type="password")
+            _pw_submitted = st.form_submit_button("로그인")
+        if _pw_submitted:
+            if check_password(_pw_input):
+                st.session_state.pw_authenticated = True
+                _cookie_ctl.set(
+                    SESSION_COOKIE_NAME,
+                    make_password_session_token(),
+                    max_age=SESSION_TTL_SECONDS,
+                    secure=True,
+                    same_site="lax",
+                )
+                # 주의: 쿠키 저장 직후 st.rerun()을 부르면 브라우저에 쿠키를 쓰기 전에
+                # 컴포넌트가 교체되며 저장이 유실될 수 있다(구글 로그인 때 겪은 문제와 동일).
+                # pw_authenticated는 이미 세팅했으니 rerun 없이 아래로 흘러가게 둔다.
+            else:
+                st.error("❌ 비밀번호가 올바르지 않습니다.")
+                st.stop()
+        else:
+            st.stop()
+
 # 구글 OAuth 로그인이 계속 invalid_grant로 실패해서(원인 미해결) 임시로 꺼둠.
 # 원인 파악되면 아래를 다시 `if _auth_configured():`로 되돌리면 됨.
 _LOGIN_GATE_ENABLED = False
@@ -322,12 +371,17 @@ with st.sidebar:
         st.warning("⚙️ LLM 설정 필요")
 
 # ── 우측 상단 계정 표시 ───────────────────────────────────────────────────────
-if st.session_state.get("authenticated_email"):
+if st.session_state.get("authenticated_email") or st.session_state.get("pw_authenticated"):
+    _acc_label = (
+        f"👤 {st.session_state.authenticated_email.split('@')[0]}"
+        if st.session_state.get("authenticated_email") else "👤 관리자"
+    )
     _acc_l, _acc_r = st.columns([8, 1])
     with _acc_r:
-        with st.popover(f"👤 {st.session_state.authenticated_email.split('@')[0]}", use_container_width=False):
+        with st.popover(_acc_label, use_container_width=False):
             if st.button("🚪 로그아웃", use_container_width=True, key="logout_top"):
                 st.session_state.authenticated_email = None
+                st.session_state.pw_authenticated = False
                 try:
                     # 컨트롤러 내부 캐시에 쿠키가 아직 안 들어있으면(예: st.context.cookies로만
                     # 읽고 이 컨트롤러의 getAll이 늦게 응답한 경우) dict.pop()이 KeyError를 던짐.

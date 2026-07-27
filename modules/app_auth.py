@@ -71,11 +71,54 @@ def verify_session_token(token: str | None) -> str | None:
 
     return email
 
+# ── 비밀번호 로그인 (단일 관리자용 — 구글 OAuth보다 단순하고 외부 의존성 없음) ──
+
+def is_password_configured() -> bool:
+    """비밀번호 로그인 게이트 사용 가능 여부 (.env에 APP_PASSWORD 설정 여부)"""
+    return bool(os.getenv("APP_PASSWORD", ""))
+
+
+def check_password(password: str) -> bool:
+    """입력한 비밀번호가 APP_PASSWORD와 일치하는지 확인 (타이밍 공격 방지)."""
+    correct = os.getenv("APP_PASSWORD", "")
+    return bool(correct) and hmac.compare_digest(password, correct)
+
+
+def make_password_session_token() -> str:
+    """비밀번호 로그인 성공 시 쿠키에 저장할 서명된 토큰 생성 (만료시각 + HMAC 서명)."""
+    expires_at = int(time.time()) + SESSION_TTL_SECONDS
+    payload = f"pwauth:{expires_at}"
+    sig = hmac.new(_get_session_secret(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}:{sig}"
+
+
+def verify_password_session_token(token: str | None) -> bool:
+    """쿠키 토큰을 검증해 유효한 비밀번호 로그인 세션이면 True."""
+    if not token:
+        return False
+    try:
+        marker, expires_at_s, sig = token.rsplit(":", 2)
+        expires_at = int(expires_at_s)
+    except (ValueError, TypeError):
+        return False
+    if marker != "pwauth":
+        return False
+
+    payload = f"{marker}:{expires_at_s}"
+    expected_sig = hmac.new(_get_session_secret(), payload.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected_sig):
+        return False
+    if time.time() > expires_at:
+        return False
+
+    return True
+
+
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 
 def is_configured() -> bool:
-    """로그인 게이트 사용 가능 여부 (클라이언트 파일 + 허용 이메일 설정 여부)"""
+    """구글 로그인 게이트 사용 가능 여부 (클라이언트 파일 + 허용 이메일 설정 여부)"""
     return LOGIN_CLIENT_SECRET_PATH.exists() and bool(os.getenv("ALLOWED_GOOGLE_EMAIL", ""))
 
 
