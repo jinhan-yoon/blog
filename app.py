@@ -16,10 +16,20 @@ st.set_page_config(
 )
 
 # Streamlit이 <html lang> 속성을 지정하지 않아 크롬이 매 방문마다 번역
-# 여부를 물어봄 -> 한국어로 명시해서 번역 팝업이 안 뜨게 함
+# 여부를 물어봄 -> 한국어로 명시 + notranslate 신호까지 같이 줘서 번역 팝업 방지
 import streamlit.components.v1 as _components_top
 _components_top.html(
-    "<script>window.parent.document.documentElement.lang = 'ko';</script>",
+    """<script>
+    var d = window.parent.document;
+    d.documentElement.lang = 'ko';
+    d.documentElement.setAttribute('translate', 'no');
+    if (!d.querySelector('meta[name="google"]')) {
+        var m = d.createElement('meta');
+        m.name = 'google';
+        m.content = 'notranslate';
+        d.head.appendChild(m);
+    }
+    </script>""",
     height=0,
 )
 
