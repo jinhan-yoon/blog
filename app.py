@@ -63,7 +63,14 @@ if _auth_configured():
                 st.stop()
         else:
             st.title("🔒 로그인이 필요합니다")
-            st.markdown(f"[🔑 구글 계정으로 로그인]({get_login_url(APP_BASE_URL)})")
+            # target="_self"를 명시해 새 탭/새 창이 아니라 현재 페이지에서 그대로 이동
+            st.markdown(
+                f'<a href="{get_login_url(APP_BASE_URL)}" target="_self" '
+                f'style="display:inline-block; padding:10px 18px; background:#4285F4; '
+                f'color:white; border-radius:8px; text-decoration:none; font-weight:600;">'
+                f'🔑 구글 계정으로 로그인</a>',
+                unsafe_allow_html=True,
+            )
             st.stop()
 
 # ── 페이지 정의 ──────────────────────────────────────────────────────────────
