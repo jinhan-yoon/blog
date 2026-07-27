@@ -15,6 +15,14 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Streamlit이 <html lang> 속성을 지정하지 않아 크롬이 매 방문마다 번역
+# 여부를 물어봄 -> 한국어로 명시해서 번역 팝업이 안 뜨게 함
+import streamlit.components.v1 as _components_top
+_components_top.html(
+    "<script>window.parent.document.documentElement.lang = 'ko';</script>",
+    height=0,
+)
+
 # Streamlit 기본 메뉴(⋮)/Deploy 버튼 숨김은 .streamlit/config.toml의
 # toolbarMode="minimal"로 처리 (헤더 전체를 CSS로 숨기면 사이드바 접기/펼치기
 # 버튼까지 함께 사라져 사이드바가 안 열리는 문제가 있어 공식 설정으로 교체함)
@@ -106,7 +114,13 @@ if _auth_configured():
                     height=0,
                 )
                 st.error(f"❌ 로그인 실패: {type(e).__name__}: {e}")
-                if getattr(e, "args", None):
+                _detail = {
+                    k: v for k, v in vars(e).items()
+                    if k not in ("args",) and not k.startswith("_")
+                } if hasattr(e, "__dict__") else {}
+                if _detail:
+                    st.code(repr(_detail), language=None)
+                elif getattr(e, "args", None):
                     st.code(repr(e.args), language=None)
                 st.markdown("🔄 새로고침하면 로그인 링크가 다시 표시됩니다.")
                 st.stop()
