@@ -1,4 +1,5 @@
 """AI 블로그 자동화 대시보드 - 사이드바 네비게이션 버전"""
+from __future__ import annotations
 
 import os
 import streamlit as st
