@@ -111,6 +111,10 @@ PAGE_KEYS    = [p["key"] for p in PAGES]
 # ── CSS ──────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+/* ── 우측 상단 Streamlit 기본 메뉴(⋮)/배포 버튼 숨김 ── */
+#MainMenu { visibility: hidden; }
+[data-testid="stToolbar"] { visibility: hidden; }
+
 /* ── 사이드바 ── */
 [data-testid="stSidebar"] { min-width: 230px; max-width: 260px; }
 
