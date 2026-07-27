@@ -73,6 +73,14 @@ def verify_session_token(token: str | None) -> str | None:
 
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
+# 인증 코드(1회용)가 짧은 시간 안에 중복 제출되는 경우(모바일 브라우저의
+# 링크 프리페치, 중복 연결 등)를 대비한 결과 캐시. 같은 code가 다시 오면
+# 구글 토큰 엔드포인트를 다시 호출하지 않고 캐시된 이메일을 그대로 반환해
+# invalid_grant를 피한다. TTL이 짧아 예전의 "서버 재시작 때문에 로그인
+# 요청이 만료" 문제(별도 원인)와는 무관하다.
+_code_result_cache: dict[str, tuple[str, float]] = {}
+_CODE_CACHE_TTL = 120  # seconds
+
 
 def is_configured() -> bool:
     """로그인 게이트 사용 가능 여부 (클라이언트 파일 + 허용 이메일 설정 여부)"""
@@ -113,6 +121,10 @@ def complete_login(code: str, redirect_uri: str, state: str = "") -> str:
     인증 코드를 교환해 로그인한 계정의 이메일을 확인.
     ALLOWED_GOOGLE_EMAIL과 일치하지 않으면 PermissionError 발생.
     """
+    cached = _code_result_cache.get(code)
+    if cached and time.time() - cached[1] < _CODE_CACHE_TTL:
+        return cached[0]
+
     code_verifier = state
     if not code_verifier:
         raise RuntimeError(
@@ -133,5 +145,11 @@ def complete_login(code: str, redirect_uri: str, state: str = "") -> str:
     allowed = os.getenv("ALLOWED_GOOGLE_EMAIL", "").strip().lower()
     if not email or email.strip().lower() != allowed:
         raise PermissionError(f"허용되지 않은 계정입니다: {email or '(이메일 확인 실패)'}")
+
+    now = time.time()
+    _code_result_cache[code] = (email, now)
+    for k, (_, cached_at) in list(_code_result_cache.items()):
+        if now - cached_at > _CODE_CACHE_TTL:
+            del _code_result_cache[k]
 
     return email
