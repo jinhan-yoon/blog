@@ -37,7 +37,18 @@ if _auth_configured():
         st.session_state.authenticated_email = None
 
     if not st.session_state.authenticated_email:
-        _restored_email = verify_session_token(_cookie_ctl.get(SESSION_COOKIE_NAME))
+        # st.context.cookies는 최초 요청 헤더에서 바로 읽으므로(비동기 컴포넌트
+        # 왕복이 필요한 _cookie_ctl.get()과 달리) 새로고침 직후 첫 실행부터 즉시
+        # 로그인 상태를 복원할 수 있다. 혹시 이 API를 못 쓰는 환경이면 조용히
+        # 실패시켜 기존 방식(_cookie_ctl)으로 자연스럽게 넘어가게 한다.
+        try:
+            _cookie_val = st.context.cookies.get(SESSION_COOKIE_NAME)
+        except Exception:
+            _cookie_val = None
+        if not _cookie_val:
+            _cookie_val = _cookie_ctl.get(SESSION_COOKIE_NAME)
+
+        _restored_email = verify_session_token(_cookie_val)
         if _restored_email:
             st.session_state.authenticated_email = _restored_email
 
