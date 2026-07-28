@@ -1,0 +1,16 @@
+[Unit]
+Description=AI Blog Automation Dashboard (Flask)
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/blog
+EnvironmentFile=/home/%i/blog/.env
+Environment=PORT=8502
+ExecStart=/home/%i/blog/venv/bin/python flask_app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
