@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import json
+import html
 import streamlit as st
 from dotenv import load_dotenv
 from pathlib import Path
@@ -40,14 +42,30 @@ _components_top.html(
 # ── 구글 로그인 게이트 ────────────────────────────────────────────────────────
 from modules.app_auth import (
     is_configured as _auth_configured,
-    get_login_url,
+    get_login_request,
     complete_login,
     make_session_token,
     verify_session_token,
     SESSION_COOKIE_NAME,
     SESSION_TTL_SECONDS,
+    OAUTH_STATE_COOKIE_NAME,
+    OAUTH_STATE_TTL_SECONDS,
 )
-from streamlit_cookies_controller import CookieController
+try:
+    from streamlit_cookies_controller import CookieController
+except ModuleNotFoundError:
+    class CookieController:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get(self, *args, **kwargs):
+            return None
+
+        def set(self, *args, **kwargs):
+            return None
+
+        def remove(self, *args, **kwargs):
+            return None
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://blog.superip.net")
 
@@ -55,26 +73,60 @@ APP_BASE_URL = os.getenv("APP_BASE_URL", "https://blog.superip.net")
 # 브라우저 쿠키에 서명된 토큰이 남아있으면 재로그인 없이 자동 복원
 _cookie_ctl = CookieController(key="auth_cookies")
 
+def _cookie_secure() -> bool:
+    return APP_BASE_URL.lower().startswith("https://")
+
+def _browser_cookie_string(name: str, value: str, max_age: int) -> str:
+    from urllib.parse import quote
+
+    attrs = [
+        f"{name}={quote(value, safe='')}",
+        f"Max-Age={int(max_age)}",
+        "Path=/",
+        "SameSite=Lax",
+    ]
+    if _cookie_secure():
+        attrs.append("Secure")
+    return "; ".join(attrs)
+
+def _write_browser_cookie(name: str, value: str, max_age: int) -> None:
+    _components_top.html(
+        f"<script>window.parent.document.cookie = {json.dumps(_browser_cookie_string(name, value, max_age))};</script>",
+        height=0,
+    )
+
+def _delete_browser_cookie(name: str) -> None:
+    attrs = [f"{name}=", "Max-Age=0", "Path=/", "SameSite=Lax"]
+    if _cookie_secure():
+        attrs.append("Secure")
+    _components_top.html(
+        f"<script>window.parent.document.cookie = {json.dumps('; '.join(attrs))};</script>",
+        height=0,
+    )
+
+def _read_cookie(name: str) -> str | None:
+    try:
+        cookie_val = st.context.cookies.get(name)
+    except Exception:
+        cookie_val = None
+    if not cookie_val:
+        cookie_val = _cookie_ctl.get(name)
+    if not cookie_val:
+        return None
+    from urllib.parse import unquote
+    return unquote(cookie_val)
+
 def _read_session_email() -> str | None:
     # st.context.cookies는 최초 요청 헤더에서 바로 읽으므로(비동기 컴포넌트
     # 왕복이 필요한 _cookie_ctl.get()과 달리) 새로고침 직후 첫 실행부터 즉시
     # 로그인 상태를 복원할 수 있다. 혹시 이 API를 못 쓰는 환경이면 조용히
     # 실패시켜 기존 방식(_cookie_ctl)으로 자연스럽게 넘어가게 한다.
-    try:
-        cookie_val = st.context.cookies.get(SESSION_COOKIE_NAME)
-    except Exception:
-        cookie_val = None
-    if not cookie_val:
-        cookie_val = _cookie_ctl.get(SESSION_COOKIE_NAME)
-    if not cookie_val:
-        return None
     # 쿠키 저장 시(streamlit_cookies_controller, universal-cookie 기반)
     # "@", ":" 등이 URL-인코딩(%40, %3A)돼 들어가는데, st.context.cookies는
     # 원본 요청 헤더 값을 그대로 주기 때문에 디코딩해줘야 email:exp:sig
     # 형식으로 정상적으로 나뉜다. 이미 디코딩된 값이 들어와도 unquote는
     # 안전한 무변화(no-op)라 두 경로 모두 안전하다.
-    from urllib.parse import unquote
-    return verify_session_token(unquote(cookie_val))
+    return verify_session_token(_read_cookie(SESSION_COOKIE_NAME))
 
 
 # 구글 OAuth invalid_grant 원인 조사 중 (콘솔 설정은 다 확인함). 계속 구글로
@@ -113,13 +165,15 @@ if _password_configured() and not _LOGIN_GATE_ENABLED:
         if _pw_submitted:
             if check_password(_pw_input):
                 st.session_state.pw_authenticated = True
+                _pw_token = make_password_session_token()
                 _cookie_ctl.set(
                     SESSION_COOKIE_NAME,
-                    make_password_session_token(),
+                    _pw_token,
                     max_age=SESSION_TTL_SECONDS,
-                    secure=True,
+                    secure=_cookie_secure(),
                     same_site="lax",
                 )
+                _write_browser_cookie(SESSION_COOKIE_NAME, _pw_token, SESSION_TTL_SECONDS)
                 # 주의: 쿠키 저장 직후 st.rerun()을 부르면 브라우저에 쿠키를 쓰기 전에
                 # 컴포넌트가 교체되며 저장이 유실될 수 있다(구글 로그인 때 겪은 문제와 동일).
                 # pw_authenticated는 이미 세팅했으니 rerun 없이 아래로 흘러가게 둔다.
@@ -133,6 +187,10 @@ if _password_configured() and not _LOGIN_GATE_ENABLED:
 if _LOGIN_GATE_ENABLED and _auth_configured():
     if "authenticated_email" not in st.session_state:
         st.session_state.authenticated_email = None
+    if "google_login_handled_code" not in st.session_state:
+        st.session_state.google_login_handled_code = None
+    if "google_login_in_progress" not in st.session_state:
+        st.session_state.google_login_in_progress = False
 
     if not st.session_state.authenticated_email:
         _restored_email = _read_session_email()
@@ -143,16 +201,28 @@ if _LOGIN_GATE_ENABLED and _auth_configured():
         _code = st.query_params.get("code")
         _state = st.query_params.get("state", "")
         if _code:
+            if st.session_state.google_login_handled_code == _code:
+                st.query_params.clear()
+                st.warning("이미 처리한 로그인 응답입니다. 로그인 버튼을 다시 눌러 새로 시도해주세요.")
+                st.stop()
+            if st.session_state.google_login_in_progress:
+                st.stop()
+            st.session_state.google_login_in_progress = True
             try:
-                _email = complete_login(_code, APP_BASE_URL, _state)
+                _oauth_state_token = _read_cookie(OAUTH_STATE_COOKIE_NAME)
+                _email = complete_login(_code, APP_BASE_URL, _state, _oauth_state_token)
                 st.session_state.authenticated_email = _email
+                st.session_state.google_login_handled_code = _code
+                _auth_token = make_session_token(_email)
                 _cookie_ctl.set(
                     SESSION_COOKIE_NAME,
-                    make_session_token(_email),
+                    _auth_token,
                     max_age=SESSION_TTL_SECONDS,
-                    secure=True,
+                    secure=_cookie_secure(),
                     same_site="lax",
                 )
+                _write_browser_cookie(SESSION_COOKIE_NAME, _auth_token, SESSION_TTL_SECONDS)
+                _delete_browser_cookie(OAUTH_STATE_COOKIE_NAME)
                 st.query_params.clear()
                 # 주의: 여기서 st.rerun()을 바로 부르면 방금 마운트된 쿠키 저장
                 # 컴포넌트가 브라우저에 document.cookie를 쓰기도 전에 다음 스크립트
@@ -160,6 +230,8 @@ if _LOGIN_GATE_ENABLED and _auth_configured():
                 # authenticated_email은 이미 세팅했으니 rerun 없이 그대로 아래로
                 # 흘러가게 둬서 같은 실행 안에서 앱 화면을 렌더링한다.
             except Exception as e:
+                st.session_state.google_login_handled_code = _code
+                _delete_browser_cookie(OAUTH_STATE_COOKIE_NAME)
                 st.query_params.clear()
                 # 인증 코드가 동시에 두 번 소비되는 경우(invalid_grant 등) —
                 # 다른 쪽 시도가 이미 성공해 쿠키가 저장돼 있을 수 있으니
@@ -179,20 +251,29 @@ if _LOGIN_GATE_ENABLED and _auth_configured():
                 st.error(f"❌ 로그인 실패: {e}")
                 st.markdown("🔄 새로고침하면 로그인 링크가 다시 표시됩니다.")
                 st.stop()
+            finally:
+                st.session_state.google_login_in_progress = False
         else:
             st.title("🔒 로그인이 필요합니다")
-            # 사용자 확인: 같은 탭(target=_self)에서 열면 invalid_grant가 계속 나고,
-            # 예전에 새 창(target=_blank)으로 열었을 때는 정상 동작했다고 함 →
-            # 새 창 방식으로 되돌려 테스트. (모바일에서 새 탭이 자동으로 안 닫히는
-            # 문제가 있었던 이력이 있어 나중에 다시 문제되면 참고할 것)
+            _auth_url, _oauth_state_token = get_login_request(APP_BASE_URL)
+            _state_cookie = _browser_cookie_string(
+                OAUTH_STATE_COOKIE_NAME,
+                _oauth_state_token,
+                OAUTH_STATE_TTL_SECONDS,
+            )
+            _login_click = html.escape(
+                f"document.cookie = {json.dumps(_state_cookie)}; "
+                f"window.location.href = {json.dumps(_auth_url)};",
+                quote=True,
+            )
             st.markdown(
-                f'<a href="{get_login_url(APP_BASE_URL)}" target="_blank" '
+                f'<button type="button" onclick="{_login_click}" '
                 f'style="display:inline-block; padding:10px 18px; background:#4285F4; '
-                f'color:white; border-radius:8px; text-decoration:none; font-weight:600;">'
-                f'🔑 구글 계정으로 로그인 (새 창)</a>',
+                f'color:white; border:0; border-radius:8px; text-decoration:none; '
+                f'font-weight:600; cursor:pointer; font-size:1rem;">'
+                f'🔑 구글 계정으로 로그인</button>',
                 unsafe_allow_html=True,
             )
-            st.caption("로그인 후 새 창은 닫고, 이 탭으로 돌아와서 새로고침 해주세요.")
             st.stop()
 
 # ── 페이지 정의 ──────────────────────────────────────────────────────────────
@@ -393,6 +474,8 @@ if st.session_state.get("authenticated_email") or st.session_state.get("pw_authe
                     _cookie_ctl.remove(SESSION_COOKIE_NAME)
                 except KeyError:
                     pass
+                _delete_browser_cookie(SESSION_COOKIE_NAME)
+                _delete_browser_cookie(OAUTH_STATE_COOKIE_NAME)
                 # 주의: 쿠키 삭제 직후 st.rerun()을 바로 부르면 브라우저가 실제로
                 # 쿠키를 지우기 전에 스크립트가 재실행돼, 다음 로드 때 옛 쿠키가
                 # 아직 남아있어 로그아웃이 안 된 것처럼 보일 수 있다(로그인 때 겪은
@@ -401,7 +484,6 @@ if st.session_state.get("authenticated_email") or st.session_state.get("pw_authe
                 st.success("✅ 로그아웃 되었습니다.")
                 st.info("🔄 새로고침하면 로그인 화면으로 돌아갑니다.")
                 st.stop()
-                st.rerun()
 
 # ════════════════════════════════════════════════════════
 # STEP 1: 트렌드 수집

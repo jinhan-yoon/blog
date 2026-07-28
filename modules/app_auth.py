@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import base64
 import hashlib
 import hmac
@@ -23,6 +24,8 @@ USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 # ── 로그인 세션 쿠키 (서버 재시작/재연결에도 로그인 유지) ──────────────────────
 SESSION_COOKIE_NAME = "blog_auth_token"
 SESSION_TTL_SECONDS = 30 * 24 * 3600  # 30일
+OAUTH_STATE_COOKIE_NAME = "blog_oauth_state"
+OAUTH_STATE_TTL_SECONDS = 10 * 60  # 10분
 _SESSION_SECRET_PATH = Path(".session_secret")
 
 
@@ -122,47 +125,96 @@ def is_configured() -> bool:
     return LOGIN_CLIENT_SECRET_PATH.exists() and bool(os.getenv("ALLOWED_GOOGLE_EMAIL", ""))
 
 
-def get_login_url(redirect_uri: str) -> str:
-    """
-    구글 로그인 동의 화면 URL 생성 (PKCE S256).
+def _urlsafe_b64encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
-    code_verifier는 OAuth state 파라미터에 그대로 실어 보낸다 (서버 메모리에
-    따로 보관하지 않음). 브라우저가 구글로 갔다 돌아오는 사이 Streamlit
-    서버가 재시작되거나 세션이 여러 번 재실행돼도, 콜백에 돌아온 state 값을
-    그대로 code_verifier로 재사용하면 되므로 "로그인 요청 만료" 문제가 없다.
-    이 앱은 최종적으로 ALLOWED_GOOGLE_EMAIL 하나만 허용하므로 state 노출로
-    인한 보안 손실은 미미하다.
-    """
+
+def _urlsafe_b64decode(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def _sign_state_payload(payload_b64: str) -> str:
+    return hmac.new(_get_session_secret(), payload_b64.encode(), hashlib.sha256).hexdigest()
+
+
+def make_oauth_state_token(state: str, code_verifier: str) -> str:
+    """OAuth 콜백 검증용 짧은 수명 토큰. 브라우저 쿠키에 저장한다."""
+    payload = {
+        "state": state,
+        "code_verifier": code_verifier,
+        "expires_at": int(time.time()) + OAUTH_STATE_TTL_SECONDS,
+    }
+    payload_b64 = _urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode())
+    return f"{payload_b64}.{_sign_state_payload(payload_b64)}"
+
+
+def verify_oauth_state_token(token: str | None, returned_state: str) -> str | None:
+    """state 쿠키를 검증하고 유효하면 PKCE code_verifier를 반환한다."""
+    if not token or not returned_state:
+        return None
+    try:
+        payload_b64, sig = token.rsplit(".", 1)
+        expected_sig = _sign_state_payload(payload_b64)
+        if not hmac.compare_digest(sig, expected_sig):
+            return None
+        payload = json.loads(_urlsafe_b64decode(payload_b64).decode())
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+    if payload.get("state") != returned_state:
+        return None
+    if time.time() > int(payload.get("expires_at", 0)):
+        return None
+
+    code_verifier = payload.get("code_verifier", "")
+    if not code_verifier:
+        return None
+    return code_verifier
+
+
+def get_login_request(redirect_uri: str) -> tuple[str, str]:
+    """구글 로그인 URL과 브라우저에 저장할 OAuth state 쿠키 토큰을 생성한다."""
     code_verifier = secrets.token_urlsafe(64)
-    code_challenge = (
-        base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
-        .rstrip(b"=")
-        .decode()
+    state = secrets.token_urlsafe(32)
+    flow = Flow.from_client_secrets_file(
+        str(LOGIN_CLIENT_SECRET_PATH),
+        SCOPES,
+        redirect_uri=redirect_uri,
+        code_verifier=code_verifier,
+        autogenerate_code_verifier=False,
     )
-
-    flow = Flow.from_client_secrets_file(str(LOGIN_CLIENT_SECRET_PATH), SCOPES, redirect_uri=redirect_uri)
     auth_url, _ = flow.authorization_url(
         access_type="online",
         prompt="select_account",
-        state=code_verifier,
-        code_challenge=code_challenge,
-        code_challenge_method="S256",
+        state=state,
     )
+    return auth_url, make_oauth_state_token(state, code_verifier)
+
+
+def get_login_url(redirect_uri: str) -> str:
+    """하위 호환용: OAuth state 쿠키 토큰 없이 URL만 반환한다."""
+    auth_url, _ = get_login_request(redirect_uri)
     return auth_url
 
 
-def complete_login(code: str, redirect_uri: str, state: str = "") -> str:
+def complete_login(code: str, redirect_uri: str, state: str = "", state_token: str | None = None) -> str:
     """
     인증 코드를 교환해 로그인한 계정의 이메일을 확인.
     ALLOWED_GOOGLE_EMAIL과 일치하지 않으면 PermissionError 발생.
     """
-    code_verifier = state
+    code_verifier = verify_oauth_state_token(state_token, state)
     if not code_verifier:
         raise RuntimeError(
-            "로그인 요청이 유효하지 않습니다. 로그인 링크를 다시 눌러 재시도해주세요."
+            "로그인 요청이 유효하지 않습니다. 로그인 버튼을 다시 눌러 재시도해주세요."
         )
 
-    flow = Flow.from_client_secrets_file(str(LOGIN_CLIENT_SECRET_PATH), SCOPES, redirect_uri=redirect_uri)
+    flow = Flow.from_client_secrets_file(
+        str(LOGIN_CLIENT_SECRET_PATH),
+        SCOPES,
+        redirect_uri=redirect_uri,
+        code_verifier=code_verifier,
+        autogenerate_code_verifier=False,
+    )
     flow.fetch_token(code=code, code_verifier=code_verifier)
 
     resp = requests.get(
