@@ -566,62 +566,98 @@ def render_page(active: str, body_template: str, **ctx):
 
 BASE_CSS = """
 <style>
-:root { color-scheme: light; --ink:#172033; --muted:#657085; --line:#dde3ef; --panel:#fff; --bg:#f5f7fb; --nav:#111827; --blue:#2563eb; --green:#16a34a; --red:#dc2626; --amber:#b45309; }
+:root { color-scheme: light; --ink:#172033; --muted:#657085; --line:#e3e8f2; --panel:#fff; --bg:#f4f6fb; --nav:#111827; --blue:#2563eb; --blue-ink:#1d4ed8; --green:#16a34a; --red:#dc2626; --amber:#b45309; --radius:12px; --shadow:0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06); }
 * { box-sizing: border-box; }
-body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); }
-a { color:#1d4ed8; }
-.shell { min-height:100vh; display:grid; grid-template-columns:248px 1fr; }
-aside { background:var(--nav); color:white; padding:18px 14px; position:sticky; top:0; height:100vh; overflow:auto; }
+body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); -webkit-font-smoothing:antialiased; }
+a { color:var(--blue-ink); }
+.shell { min-height:100vh; display:grid; grid-template-columns:252px 1fr; }
+.nav-toggle-checkbox { display:none; }
+.nav-toggle-label { display:none; }
+.nav-backdrop { display:none; }
+aside { background:var(--nav); color:white; padding:20px 14px; position:sticky; top:0; height:100vh; overflow:auto; transition:transform .25s ease; }
 aside h1 { font-size:18px; margin:0 0 4px; }
 aside .caption { color:#9ca3af; font-size:12px; margin-bottom:18px; }
-.nav-section { margin:18px 0 8px; color:#cbd5e1; font-size:13px; font-weight:700; }
-.nav-link { display:flex; gap:8px; align-items:center; color:#d1d5db; text-decoration:none; padding:10px 12px; border-radius:6px; margin:4px 0; }
-.nav-link:hover, .nav-link.active { background:#1f2937; color:white; }
-.status { border-top:1px solid #273244; margin-top:18px; padding-top:14px; font-size:12px; color:#cbd5e1; line-height:1.7; }
-main { padding:24px 28px 42px; max-width:1320px; width:100%; }
-.topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; }
+.nav-section { margin:18px 0 8px; color:#8b95a8; font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.nav-link { display:flex; gap:10px; align-items:center; color:#d1d5db; text-decoration:none; padding:11px 12px; border-radius:9px; margin:3px 0; font-size:14.5px; transition:background .15s; }
+.nav-link:hover { background:#1f2937; color:white; }
+.nav-link.active { background:var(--blue); color:white; font-weight:700; }
+.status { border-top:1px solid #273244; margin-top:18px; padding-top:14px; font-size:12px; color:#cbd5e1; line-height:1.8; }
+main { padding:26px 32px 48px; max-width:1320px; width:100%; }
+.topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; gap:10px; }
 .topbar form { margin:0; }
-.panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:20px; margin:0 0 18px; }
+.panel { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:22px; margin:0 0 18px; }
 .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
 .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
 .grid4 { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
-.header { background:#263a73; color:white; padding:12px 16px; border-radius:8px; font-weight:800; margin-bottom:16px; }
-.notice { background:#eff6ff; border-left:4px solid var(--blue); padding:12px 14px; border-radius:0 6px 6px 0; margin:10px 0; }
+.header { background:linear-gradient(135deg,#2563eb,#1e3a8a); color:white; padding:14px 18px; border-radius:var(--radius); font-weight:800; margin-bottom:18px; box-shadow:var(--shadow); }
+.notice { background:#eff6ff; border-left:4px solid var(--blue); padding:12px 14px; border-radius:0 8px 8px 0; margin:10px 0; }
 .notice.success { background:#f0fdf4; border-left-color:var(--green); }
 .notice.error { background:#fef2f2; border-left-color:var(--red); }
 .notice.warn { background:#fffbeb; border-left-color:#f59e0b; }
-.flash { padding:10px 12px; border-radius:6px; margin:8px 0; background:#eff6ff; border:1px solid #bfdbfe; }
+.flash { padding:11px 14px; border-radius:8px; margin:8px 0; background:#eff6ff; border:1px solid #bfdbfe; }
 .flash.success { background:#f0fdf4; border-color:#bbf7d0; }
 .flash.error { background:#fef2f2; border-color:#fecaca; }
-.btn, button { border:0; border-radius:6px; background:#374151; color:white; padding:9px 13px; font-weight:700; text-decoration:none; cursor:pointer; display:inline-block; }
+.btn, button { border:0; border-radius:8px; background:#374151; color:white; padding:10px 15px; font-weight:700; text-decoration:none; cursor:pointer; display:inline-block; font-size:14px; transition:filter .12s, transform .05s; }
+.btn:hover, button:hover { filter:brightness(1.08); }
+.btn:active, button:active { transform:translateY(1px); }
 .btn.primary, button.primary { background:var(--blue); }
-.btn.success { background:var(--green); }
-.btn.danger { background:var(--red); }
-.btn.small, button.small { padding:6px 9px; font-size:12px; }
-input, select, textarea { width:100%; padding:9px 11px; border:1px solid #cfd7e6; border-radius:6px; background:white; font:inherit; }
+.btn.success, button.success { background:var(--green); }
+.btn.danger, button.danger { background:var(--red); }
+.btn.small, button.small { padding:7px 10px; font-size:12.5px; }
+input, select, textarea { width:100%; padding:10px 12px; border:1px solid #cfd7e6; border-radius:8px; background:white; font:inherit; }
+input:focus, select:focus, textarea:focus { outline:2px solid #bfdbfe; border-color:var(--blue); }
 textarea { min-height:160px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 label { display:block; font-size:13px; font-weight:700; color:#334155; margin:10px 0 6px; }
 .inline { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .chip { display:inline-flex; align-items:center; gap:5px; background:#eef2ff; color:#3730a3; padding:5px 9px; border-radius:999px; font-size:13px; font-weight:700; margin:3px; }
 .checkbox-list { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
-.checkbox { border:1px solid var(--line); background:#fff; border-radius:6px; padding:9px; min-height:54px; }
-.preview { border:1px solid var(--line); border-radius:8px; padding:18px; background:#fff; overflow:auto; }
-.card { border:1px solid var(--line); border-radius:8px; padding:14px; background:#fff; }
+.checkbox { border:1px solid var(--line); background:#fff; border-radius:8px; padding:10px; min-height:54px; }
+.preview { border:1px solid var(--line); border-radius:var(--radius); padding:18px; background:#fff; overflow:auto; }
+.card { border:1px solid var(--line); border-radius:var(--radius); padding:14px; background:#fff; box-shadow:var(--shadow); }
 .muted { color:var(--muted); font-size:13px; }
 hr { border:0; border-top:1px solid var(--line); margin:18px 0; }
-code, pre { background:#f1f5f9; border-radius:5px; padding:2px 5px; }
+code, pre { background:#f1f5f9; border-radius:6px; padding:2px 5px; }
 pre { padding:12px; overflow:auto; white-space:pre-wrap; }
-details { border:1px solid var(--line); border-radius:8px; padding:12px; background:#fff; margin:10px 0; }
+details { border:1px solid var(--line); border-radius:var(--radius); padding:12px; background:#fff; margin:10px 0; }
 summary { cursor:pointer; font-weight:800; }
 .login { min-height:100vh; display:grid; place-items:center; padding:24px; }
 .login .panel { max-width:430px; width:100%; }
-@media (max-width:900px) { .shell { grid-template-columns:1fr; } aside { position:static; height:auto; } .grid2,.grid3,.grid4,.checkbox-list { grid-template-columns:1fr; } main { padding:16px; } }
+
+/* ── 모바일: 접이식 사이드바 (체크박스 해크, JS 불필요) ── */
+@media (max-width:900px) {
+  .shell { grid-template-columns:1fr; }
+  .nav-toggle-label {
+    display:flex; align-items:center; justify-content:center;
+    position:fixed; top:14px; left:14px; z-index:1001;
+    width:44px; height:44px; border-radius:10px;
+    background:var(--nav); color:white; font-size:20px;
+    box-shadow:var(--shadow); cursor:pointer;
+  }
+  aside {
+    position:fixed; top:0; left:0; height:100vh; width:264px; z-index:1000;
+    transform:translateX(-100%); box-shadow:2px 0 16px rgba(0,0,0,.25);
+  }
+  .nav-toggle-checkbox:checked ~ aside { transform:translateX(0); }
+  .nav-toggle-checkbox:checked ~ .nav-backdrop {
+    display:block; position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:999;
+  }
+  main { padding:72px 16px 32px; }
+  .grid2, .grid3, .grid4, .checkbox-list { grid-template-columns:1fr; }
+  .topbar { padding-left:52px; }
+  .btn, button { min-height:44px; padding:11px 16px; }
+  .btn.small, button.small { min-height:38px; }
+  input, select, textarea { min-height:44px; font-size:16px; } /* 16px: iOS 자동 확대 방지 */
+}
 </style>
 """
 
 BASE_TEMPLATE = """
 <!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI 블로그 자동화</title>{{ css|safe }}</head>
-<body><div class="shell"><aside><h1>AI 블로그 자동화</h1><div class="caption">Trends → AI → Media → Publish</div>
+<body><div class="shell">
+<input type="checkbox" id="nav-toggle" class="nav-toggle-checkbox">
+<label for="nav-toggle" class="nav-toggle-label" aria-label="메뉴 열기">☰</label>
+<label for="nav-toggle" class="nav-backdrop" aria-label="메뉴 닫기"></label>
+<aside><h1>AI 블로그 자동화</h1><div class="caption">Trends → AI → Media → Publish</div>
 <div class="nav-section">프로세스</div>
 <a class="nav-link {{ 'active' if active=='trends' else '' }}" href="{{ url_for('trends') }}">📊 트렌드 수집</a>
 <a class="nav-link {{ 'active' if active=='content' else '' }}" href="{{ url_for('content') }}">✍️ 콘텐츠 작성</a>
