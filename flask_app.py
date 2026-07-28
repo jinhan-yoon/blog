@@ -680,12 +680,39 @@ summary { cursor:pointer; font-weight:800; }
   }
   input, select, textarea { min-height:44px; font-size:16px; } /* 16px: iOS 자동 확대 방지 */
 }
+
+/* ── 페이지 전환/폼 제출 시 전체화면 로딩 오버레이 ── */
+.page-loading {
+  display:none; position:fixed; inset:0; z-index:2000;
+  background:rgba(15,23,42,.55); backdrop-filter:blur(2px);
+  align-items:center; justify-content:center; flex-direction:column; gap:14px;
+}
+.page-loading.show { display:flex; }
+.page-loading .spinner { font-size:46px; animation:page-loading-spin 1s linear infinite; }
+.page-loading .msg { color:white; font-weight:700; font-size:14px; }
+@keyframes page-loading-spin { to { transform:rotate(360deg); } }
 </style>
+"""
+
+PAGE_LOADING_HTML = """
+<div class="page-loading" id="page-loading"><div class="spinner">⏳</div><div class="msg">처리 중입니다...</div></div>
+<script>
+(function(){
+  var overlay = document.getElementById('page-loading');
+  function show(){ overlay.classList.add('show'); }
+  document.addEventListener('submit', function(){ show(); });
+  document.addEventListener('click', function(e){
+    var a = e.target.closest('a');
+    if (a && a.href && !a.target && a.origin === location.origin) { show(); }
+  });
+  window.addEventListener('pageshow', function(){ overlay.classList.remove('show'); });
+})();
+</script>
 """
 
 BASE_TEMPLATE = """
 <!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI 블로그 자동화</title>{{ css|safe }}</head>
-<body><div class="shell">
+<body>{{ page_loading|safe }}<div class="shell">
 <input type="checkbox" id="nav-toggle" class="nav-toggle-checkbox">
 <label for="nav-toggle" class="nav-backdrop" aria-label="메뉴 닫기"></label>
 <aside><h1>AI 블로그 자동화</h1><div class="caption">Trends → AI → Media → Publish</div>
@@ -707,7 +734,7 @@ BASE_TEMPLATE = """
 
 LOGIN_TEMPLATE = """
 <!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI 블로그 자동화</title>{{ css|safe }}</head>
-<body class="login"><section class="panel"><h2>로그인이 필요합니다</h2>{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+<body class="login">{{ page_loading|safe }}<section class="panel"><h2>로그인이 필요합니다</h2>{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
 {% if google_enabled %}<p><a class="btn primary" href="{{ url_for('google_login') }}">구글 계정으로 로그인</a></p>{% endif %}
 {% if password_enabled %}<form method="post"><label>비밀번호</label><input type="password" name="password" autocomplete="current-password" required><button class="primary" type="submit">비밀번호로 로그인</button></form>{% endif %}
 {% if not google_enabled and not password_enabled %}<p class="notice error">로그인 설정이 없습니다. .env의 APP_PASSWORD 또는 Google 로그인 설정을 확인하세요.</p>{% endif %}</section></body></html>
@@ -753,6 +780,7 @@ MANUAL_TEMPLATE = """
 
 # Jinja templates need os in settings.
 app.jinja_env.globals["os"] = os
+app.jinja_env.globals["page_loading"] = PAGE_LOADING_HTML
 
 if __name__ == "__main__":
     # threaded=True: 네이버 발행을 백그라운드 스레드로 돌리고 그 사이 진행 상황
