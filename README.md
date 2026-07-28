@@ -1,6 +1,6 @@
 # 🤖 AI 블로그 자동화 대시보드
 
-Google Trends → AI 콘텐츠 생성 → 이미지 생성 → Google Blogger 발행까지 전 과정을 자동화하는 Streamlit 기반 웹 앱.
+Google Trends → AI 콘텐츠 생성 → 이미지 생성 → Google Blogger 발행까지 전 과정을 자동화하는 Flask 기반 웹 앱.
 
 ---
 
@@ -17,7 +17,7 @@ Google Trends → AI 콘텐츠 생성 → 이미지 생성 → Google Blogger �
 
 | 분류 | 기술 | 비고 |
 |------|------|------|
-| 웹 프레임워크 | Streamlit ≥ 1.35 | 사이드바 네비게이션, session_state |
+| 웹 프레임워크 | Flask ≥ 3.0 | 서버 세션 기반 대시보드 |
 | LLM (1순위) | vLLM (자체 호스팅) | Google Gemma 4 31B-it, OpenAI 호환 API |
 | LLM (fallback) | Anthropic Claude API | claude-sonnet-4-6 기본값 |
 | 이미지 생성 | Pollinations.ai | 무료, API 키 불필요 (기본값) |
@@ -34,7 +34,8 @@ Google Trends → AI 콘텐츠 생성 → 이미지 생성 → Google Blogger �
 
 ```
 blog/
-├── app.py                    # 메인 Streamlit 앱 (사이드바 네비게이션)
+├── flask_app.py              # 메인 Flask 앱 (대시보드/로그인/발행)
+├── app.py                    # 이전 Streamlit 앱 (레거시)
 ├── requirements.txt          # Python 패키지 목록
 ├── .env                      # 환경 변수 (API 키 등, git 제외)
 ├── .env.example              # 환경 변수 예시
@@ -99,7 +100,7 @@ cp .env.example .env
 python naver_setup.py
 
 # 5. 앱 실행
-streamlit run app.py --server.port 8501
+python flask_app.py
 
 # 또는 run.sh 사용
 bash run.sh

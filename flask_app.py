@@ -1,18 +1,28 @@
-"""Flask entry point for the AI blog dashboard.
 
-This is the migration path away from Streamlit for authentication-sensitive
-flows. It implements stable Google OAuth/password login with server-managed
-cookies. The Streamlit app remains available while feature pages are moved over
-incrementally.
-"""
 from __future__ import annotations
 
+import base64
+import json
 import os
+import secrets
+from datetime import datetime
 from functools import wraps
+from pathlib import Path
 from urllib.parse import unquote
 
 from dotenv import load_dotenv
-from flask import Flask, make_response, redirect, render_template_string, request, url_for
+from flask import (
+    Flask,
+    flash,
+    make_response,
+    redirect,
+    render_template_string,
+    request,
+    send_file,
+    session,
+    url_for,
+)
+from werkzeug.utils import secure_filename
 
 from modules.app_auth import (
     SESSION_COOKIE_NAME,
@@ -32,9 +42,58 @@ load_dotenv()
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://blog.superip.net").rstrip("/")
 COOKIE_SECURE = APP_BASE_URL.lower().startswith("https://")
+DATA_DIR = Path("data")
+ERROR_DIR = Path("naver_errors")
 
 app = Flask(__name__)
 app.secret_key = os.getenv("APP_SESSION_SECRET") or os.getenv("FLASK_SECRET_KEY") or "change-me-in-env"
+
+_workspaces: dict[str, dict] = {}
+
+DEFAULT_WORKSPACE = {
+    "trends": None,
+    "selected_keywords": [],
+    "manual_keywords": [],
+    "topics": None,
+    "post_topic": None,
+    "post_title": "",
+    "post_content_html": "",
+    "post_meta_desc": "",
+    "post_tags": [],
+    "image_prompts": [],
+    "image_data": [],
+    "final_html": "",
+    "publish_result": None,
+    "naver_publish_result": None,
+    "publish_history": [],
+    "blogger_recent_posts": None,
+    "oauth_url": None,
+    "oauth_redirect_uri": None,
+    "oauth_code_verifier": None,
+    "naver_login_state": None,
+}
+
+
+def _clone_default() -> dict:
+    return json.loads(json.dumps(DEFAULT_WORKSPACE))
+
+
+def _workspace() -> dict:
+    wid = request.cookies.get("blog_workspace_id") or session.get("workspace_id")
+    if not wid:
+        wid = secrets.token_urlsafe(18)
+        session["workspace_id"] = wid
+    if wid not in _workspaces:
+        _workspaces[wid] = _clone_default()
+    return _workspaces[wid]
+
+
+@app.after_request
+def _ensure_workspace_cookie(resp):
+    wid = session.get("workspace_id")
+    if wid and not request.cookies.get("blog_workspace_id"):
+        resp.set_cookie("blog_workspace_id", wid, max_age=SESSION_TTL_SECONDS, secure=COOKIE_SECURE, httponly=True, samesite="Lax", path="/")
+    return resp
 
 
 def _current_user() -> str | None:
@@ -51,15 +110,7 @@ def _current_user() -> str | None:
 
 
 def _set_auth_cookie(resp, token: str):
-    resp.set_cookie(
-        SESSION_COOKIE_NAME,
-        token,
-        max_age=SESSION_TTL_SECONDS,
-        secure=COOKIE_SECURE,
-        httponly=True,
-        samesite="Lax",
-        path="/",
-    )
+    resp.set_cookie(SESSION_COOKIE_NAME, token, max_age=SESSION_TTL_SECONDS, secure=COOKIE_SECURE, httponly=True, samesite="Lax", path="/")
     return resp
 
 
@@ -74,31 +125,65 @@ def login_required(fn):
         if not _current_user():
             return redirect(url_for("login"))
         return fn(*args, **kwargs)
-
     return wrapper
 
 
-BASE_CSS = """
-<style>
-:root { color-scheme: light; }
-body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7fb; color: #172033; }
-.shell { min-height: 100vh; display: grid; grid-template-columns: 240px 1fr; }
-aside { background: #111827; color: white; padding: 22px 18px; }
-aside h1 { font-size: 18px; margin: 0 0 20px; }
-aside a { display: block; color: #d1d5db; text-decoration: none; padding: 10px 12px; border-radius: 6px; margin: 4px 0; }
-aside a:hover { background: #1f2937; color: white; }
-main { padding: 28px; }
-.panel { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 22px; max-width: 960px; }
-.login { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-.login .panel { max-width: 420px; width: 100%; }
-.btn { display: inline-block; border: 0; border-radius: 6px; background: #2563eb; color: white; padding: 10px 16px; font-weight: 700; text-decoration: none; cursor: pointer; }
-.btn.secondary { background: #374151; }
-input { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; margin: 8px 0 12px; }
-.notice { background: #eff6ff; border-left: 4px solid #2563eb; padding: 12px 14px; border-radius: 0 6px 6px 0; }
-.error { background: #fef2f2; border-left-color: #dc2626; }
-@media (max-width: 760px) { .shell { grid-template-columns: 1fr; } aside { position: static; } }
-</style>
+def _tags_from_text(text: str) -> list[str]:
+    return [t.strip() for t in (text or "").split(",") if t.strip()]
+
+
+def _safe_saved_path(name: str) -> Path:
+    DATA_DIR.mkdir(exist_ok=True)
+    safe = secure_filename(name)
+    path = DATA_DIR / safe
+    if path.parent.resolve() != DATA_DIR.resolve() or path.suffix != ".json":
+        raise ValueError("잘못된 파일명입니다.")
+    return path
+
+
+def _saved_posts() -> list[dict]:
+    DATA_DIR.mkdir(exist_ok=True)
+    posts = []
+    for path in sorted(DATA_DIR.glob("*.json"), reverse=True):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        posts.append({"name": path.name, "path": path, "data": data})
+    return posts
+
+
+def _save_env(form) -> None:
+    existing_password = os.getenv("APP_PASSWORD", "")
+    existing_secret = os.getenv("APP_SESSION_SECRET", "")
+    env_content = f"""# -- LLM server -------------------------------------------------
+LLM_ADDR={form.get('llm_addr', '')}
+LLM_MODEL={form.get('llm_model', '')}
+LLM_API_KEY={form.get('llm_api_key', '')}
+
+# -- Image generation -------------------------------------------
+IMAGE_PROVIDER={form.get('image_provider', 'pollinations')}
+ANTHROPIC_API_KEY={form.get('anthropic_key', '')}
+OPENAI_API_KEY={form.get('openai_key', '')}
+HUGGINGFACE_TOKEN={form.get('hf_token', '')}
+CLAUDE_MODEL={form.get('claude_model', 'claude-sonnet-4-6')}
+
+# -- Google Blogger ---------------------------------------------
+BLOGGER_BLOG_ID={form.get('blogger_blog_id', '')}
+
+# -- Naver Blog --------------------------------------------------
+NAVER_ID={form.get('naver_id', '')}
+NAVER_PW={form.get('naver_pw', '')}
+NAVER_BLOG_ID={form.get('naver_blog_id', '')}
+
+# -- App login ---------------------------------------------------
+APP_BASE_URL={form.get('app_base_url', APP_BASE_URL)}
+ALLOWED_GOOGLE_EMAIL={form.get('allowed_email', '')}
+APP_PASSWORD={form.get('app_password', existing_password)}
+APP_SESSION_SECRET={existing_secret}
 """
+    Path(".env").write_text(env_content, encoding="utf-8")
+    load_dotenv(override=True)
 
 
 @app.route("/", methods=["GET"])
@@ -109,16 +194,9 @@ def index():
         try:
             email = complete_login(code, APP_BASE_URL, state)
         except Exception as exc:
-            return render_template_string(
-                LOGIN_TEMPLATE,
-                css=BASE_CSS,
-                error=f"구글 로그인 실패: {exc}",
-                google_enabled=google_auth_configured(),
-                password_enabled=is_password_configured(),
-            ), 401
+            return render_login(error=f"구글 로그인 실패: {exc}"), 401
         resp = make_response(redirect(url_for("dashboard")))
         return _set_auth_cookie(resp, make_session_token(email))
-
     if not _current_user():
         return redirect(url_for("login"))
     return redirect(url_for("dashboard"))
@@ -133,19 +211,13 @@ def login():
             resp = make_response(redirect(url_for("dashboard")))
             return _set_auth_cookie(resp, make_password_session_token())
         error = "비밀번호가 올바르지 않습니다."
-
-    return render_template_string(
-        LOGIN_TEMPLATE,
-        css=BASE_CSS,
-        error=error,
-        google_enabled=google_auth_configured(),
-        password_enabled=is_password_configured(),
-    )
+    return render_login(error=error)
 
 
 @app.route("/google-login")
 def google_login():
     if not google_auth_configured():
+        flash("구글 로그인 설정이 아직 완료되지 않았습니다.", "error")
         return redirect(url_for("login"))
     return redirect(get_login_url(APP_BASE_URL))
 
@@ -159,7 +231,303 @@ def logout():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    return render_template_string(DASHBOARD_TEMPLATE, css=BASE_CSS, user=_current_user())
+    return redirect(url_for("trends"))
+
+
+@app.route("/trends", methods=["GET", "POST"])
+@login_required
+def trends():
+    ws = _workspace()
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "collect":
+            from modules.trend_collector import collect_all_trends
+            ws["trends"] = collect_all_trends()
+            flash("트렌드 수집이 완료되었습니다.", "success")
+        elif action == "add_manual":
+            for kw in _tags_from_text(request.form.get("manual_keywords", "")):
+                if kw not in ws["manual_keywords"]:
+                    ws["manual_keywords"].append(kw)
+        elif action == "remove_manual":
+            kw = request.form.get("keyword", "")
+            ws["manual_keywords"] = [k for k in ws["manual_keywords"] if k != kw]
+        elif action == "clear_manual":
+            ws["manual_keywords"] = []
+        elif action == "select_keywords":
+            chosen = request.form.getlist("keywords")
+            for kw in ws["manual_keywords"]:
+                if kw not in chosen:
+                    chosen.append(kw)
+            ws["selected_keywords"] = chosen
+            flash(f"키워드 {len(chosen)}개를 선택했습니다.", "success")
+            return redirect(url_for("content"))
+        return redirect(url_for("trends"))
+    return render_page("trends", TRENDS_TEMPLATE, ws=ws)
+
+
+@app.route("/content", methods=["GET", "POST"])
+@login_required
+def content():
+    ws = _workspace()
+    if request.method == "POST":
+        action = request.form.get("action")
+        try:
+            if action == "suggest_topics":
+                from modules.content_generator import suggest_topics
+                count = int(request.form.get("topic_count", "5"))
+                ws["topics"] = suggest_topics(ws["selected_keywords"], count)
+                flash("주제 추천이 완료되었습니다.", "success")
+            elif action == "select_topic":
+                idx = int(request.form.get("topic_index", "0"))
+                topic = (ws.get("topics") or [])[idx]
+                ws["post_topic"] = topic
+                ws["post_title"] = topic.get("title", "")
+                ws["topics"] = None
+            elif action == "custom_title":
+                ws["post_title"] = request.form.get("post_title", "").strip()
+                ws["topics"] = None
+            elif action == "generate_post":
+                from modules.content_generator import generate_blog_post
+                keywords = _tags_from_text(request.form.get("keywords", "")) or ws["selected_keywords"]
+                result = generate_blog_post(request.form.get("title", ws["post_title"]), keywords, request.form.get("tone", "정보전달"))
+                ws["post_title"] = result.get("title", ws["post_title"])
+                ws["post_content_html"] = result.get("content_html", "")
+                ws["post_meta_desc"] = result.get("meta_description", "")
+                ws["post_tags"] = result.get("tags", [])
+                ws["image_prompts"] = result.get("image_prompts", [])
+                ws["final_html"] = ""
+                flash("본문이 생성되었습니다.", "success")
+            elif action == "save_edits":
+                ws["post_title"] = request.form.get("title", ws["post_title"])
+                ws["post_content_html"] = request.form.get("content_html", "")
+                ws["post_tags"] = _tags_from_text(request.form.get("tags", ""))
+                ws["post_meta_desc"] = request.form.get("meta_description", "")
+                ws["final_html"] = ""
+                flash("수정 내용을 반영했습니다.", "success")
+            elif action == "refine":
+                from modules.content_generator import refine_content
+                ws["post_content_html"] = refine_content(request.form.get("content_html", ""), request.form.get("instruction", ""))
+                ws["final_html"] = ""
+                flash("AI 수정이 적용되었습니다.", "success")
+        except Exception as exc:
+            flash(f"오류: {exc}", "error")
+        return redirect(url_for("content"))
+    return render_page("content", CONTENT_TEMPLATE, ws=ws)
+
+
+@app.route("/media", methods=["GET", "POST"])
+@login_required
+def media():
+    ws = _workspace()
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "skip":
+            ws["final_html"] = ws.get("post_content_html", "")
+            flash("이미지 없이 발행 단계로 넘겼습니다.", "success")
+            return redirect(url_for("publish"))
+        if action == "generate_images":
+            try:
+                from modules.image_generator import generate_images_for_post, insert_images_into_html
+                prompts = [request.form.get(f"prompt_{i}", "") for i in range(3)]
+                provider = request.form.get("provider", "pollinations")
+                results = generate_images_for_post(prompts, provider)
+                ws["image_prompts"] = prompts
+                ws["final_html"] = insert_images_into_html(ws["post_content_html"], results)
+                ws["image_data"] = [
+                    {k: v for k, v in r.items() if k != "bytes"} | {"has_bytes": bool(r.get("bytes"))}
+                    for r in results
+                ]
+                flash("이미지 생성 및 삽입이 완료되었습니다.", "success")
+            except Exception as exc:
+                flash(f"이미지 생성 실패: {exc}", "error")
+        return redirect(url_for("media"))
+    return render_page("media", MEDIA_TEMPLATE, ws=ws)
+
+
+@app.route("/publish", methods=["GET", "POST"])
+@login_required
+def publish():
+    ws = _workspace()
+    final_html = ws.get("final_html") or ws.get("post_content_html", "")
+    if request.method == "POST":
+        action = request.form.get("action")
+        title = request.form.get("title", ws.get("post_title", ""))
+        try:
+            if action == "save_local":
+                DATA_DIR.mkdir(exist_ok=True)
+                safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:40].strip() or "post"
+                path = DATA_DIR / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_title}.json"
+                payload = {
+                    "title": title,
+                    "content_html": final_html,
+                    "tags": ws.get("post_tags", []),
+                    "meta_description": ws.get("post_meta_desc", ""),
+                    "saved_at": datetime.now().isoformat(),
+                }
+                path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                flash(f"로컬 저장 완료: {path.name}", "success")
+            elif action in ("blogger_draft", "blogger_publish"):
+                from modules.blogger_publisher import publish_post
+                result = publish_post(title, final_html, ws.get("post_tags", []), is_draft=(action == "blogger_draft"))
+                ws["publish_result"] = result
+                if not result.get("error"):
+                    ws["publish_history"].append(result)
+                flash("Blogger 작업이 완료되었습니다.", "success")
+            elif action == "naver_publish":
+                from modules.naver_blog_poster import publish_post as naver_publish_post
+                ws["naver_publish_result"] = naver_publish_post(title, final_html, ws.get("post_tags", []))
+                flash("네이버 발행 작업이 완료되었습니다.", "success")
+            elif action == "refresh_recent":
+                from modules.blogger_publisher import list_recent_posts
+                ws["blogger_recent_posts"] = list_recent_posts()
+            elif action == "delete_blogger":
+                from modules.blogger_publisher import delete_post, list_recent_posts
+                delete_post(request.form.get("post_id", ""))
+                ws["blogger_recent_posts"] = list_recent_posts()
+                flash("Blogger 글을 삭제했습니다.", "success")
+        except Exception as exc:
+            if action and action.startswith("blogger"):
+                ws["publish_result"] = {"error": str(exc)}
+            flash(f"오류: {exc}", "error")
+        return redirect(url_for("publish"))
+    return render_page("publish", PUBLISH_TEMPLATE, ws=ws, final_html=final_html)
+
+
+@app.route("/saved", methods=["GET", "POST"])
+@login_required
+def saved():
+    ws = _workspace()
+    if request.method == "POST":
+        action = request.form.get("action")
+        try:
+            path = _safe_saved_path(request.form.get("file", "")) if request.form.get("file") else None
+            if action == "load" and path:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                ws["post_title"] = data.get("title", "")
+                ws["post_content_html"] = data.get("content_html", "")
+                ws["final_html"] = data.get("content_html", "")
+                ws["post_tags"] = data.get("tags", [])
+                ws["post_meta_desc"] = data.get("meta_description", "")
+                flash("저장된 글을 현재 작업으로 불러왔습니다.", "success")
+                return redirect(url_for("publish"))
+            if action == "delete" and path:
+                path.unlink()
+                flash("저장된 글을 삭제했습니다.", "success")
+            if action == "update" and path:
+                payload = {
+                    "title": request.form.get("title", ""),
+                    "content_html": request.form.get("content_html", ""),
+                    "tags": _tags_from_text(request.form.get("tags", "")),
+                    "meta_description": request.form.get("meta_description", ""),
+                    "saved_at": request.form.get("saved_at", ""),
+                    "updated_at": datetime.now().isoformat(),
+                }
+                path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                flash("저장된 글을 수정했습니다.", "success")
+            if action == "publish" and path:
+                from modules.blogger_publisher import publish_post
+                data = json.loads(path.read_text(encoding="utf-8"))
+                result = publish_post(data.get("title", ""), data.get("content_html", ""), data.get("tags", []), is_draft=False)
+                ws["publish_result"] = result
+                flash("저장된 글을 Blogger에 발행했습니다.", "success")
+        except Exception as exc:
+            flash(f"오류: {exc}", "error")
+        return redirect(url_for("saved"))
+    return render_page("saved", SAVED_TEMPLATE, ws=ws, posts=_saved_posts())
+
+
+@app.route("/settings", methods=["GET", "POST"])
+@login_required
+def settings():
+    ws = _workspace()
+    if request.method == "POST":
+        action = request.form.get("action")
+        try:
+            if action == "save_env":
+                _save_env(request.form)
+                flash("설정이 .env 파일에 저장되었습니다. 서비스 재시작 후 완전히 반영됩니다.", "success")
+            elif action == "upload_client_secret":
+                upload = request.files.get("client_secret")
+                if upload and upload.filename:
+                    Path("client_secret.json").write_bytes(upload.read())
+                    flash("client_secret.json 저장 완료", "success")
+            elif action == "upload_login_secret":
+                upload = request.files.get("login_client_secret")
+                if upload and upload.filename:
+                    Path("login_client_secret.json").write_bytes(upload.read())
+                    flash("login_client_secret.json 저장 완료", "success")
+            elif action == "oauth_start":
+                from modules.blogger_publisher import get_oauth_url
+                redirect_uri = request.form.get("redirect_uri", "http://localhost")
+                result = get_oauth_url(redirect_uri=redirect_uri)
+                ws["oauth_url"] = result["url"]
+                ws["oauth_code_verifier"] = result["code_verifier"]
+                ws["oauth_redirect_uri"] = redirect_uri
+            elif action == "oauth_complete":
+                from modules.blogger_publisher import complete_oauth
+                complete_oauth(request.form.get("oauth_code", ""), ws.get("oauth_redirect_uri") or "http://localhost", ws.get("oauth_code_verifier") or "")
+                ws["oauth_url"] = None
+                ws["oauth_code_verifier"] = None
+                ws["oauth_redirect_uri"] = None
+                flash("Google OAuth 인증 성공", "success")
+            elif action == "oauth_reset":
+                Path("token.json").unlink(missing_ok=True)
+                flash("token.json을 삭제했습니다. 재인증을 진행하세요.", "success")
+            elif action == "blog_test":
+                from modules.blogger_publisher import test_blog_connection
+                result = test_blog_connection(request.form.get("blogger_blog_id", ""))
+                flash(("연결 성공: " + result.get("blog_name", "")) if result.get("ok") else "연결 실패: " + result.get("error", ""), "success" if result.get("ok") else "error")
+            elif action == "naver_login_start":
+                from modules.naver_blog_poster import start_interactive_login
+                state = start_interactive_login()
+                if state.get("screenshot"):
+                    state["screenshot_b64"] = base64.b64encode(state.pop("screenshot")).decode("ascii")
+                ws["naver_login_state"] = state
+            elif action == "naver_login_submit":
+                from modules.naver_blog_poster import submit_login_challenge
+                state = submit_login_challenge(request.form.get("session_id", ""), request.form.get("answer", ""))
+                if state.get("screenshot"):
+                    state["screenshot_b64"] = base64.b64encode(state.pop("screenshot")).decode("ascii")
+                ws["naver_login_state"] = state
+            elif action == "naver_login_cancel":
+                from modules.naver_blog_poster import cancel_login_challenge
+                state = ws.get("naver_login_state") or {}
+                if state.get("session_id"):
+                    cancel_login_challenge(state["session_id"])
+                ws["naver_login_state"] = None
+        except Exception as exc:
+            flash(f"오류: {exc}", "error")
+        return redirect(url_for("settings"))
+    return render_page("settings", SETTINGS_TEMPLATE, ws=ws)
+
+
+@app.route("/logs", methods=["GET", "POST"])
+@login_required
+def logs():
+    if request.method == "POST":
+        name = secure_filename(request.form.get("file", ""))
+        path = ERROR_DIR / name
+        if path.exists() and path.parent.resolve() == ERROR_DIR.resolve():
+            path.unlink()
+            flash("오류 스크린샷을 삭제했습니다.", "success")
+        return redirect(url_for("logs"))
+    shots = sorted(ERROR_DIR.glob("*.png"), reverse=True) if ERROR_DIR.exists() else []
+    return render_page("logs", LOGS_TEMPLATE, shots=shots)
+
+
+@app.route("/logs/image/<name>")
+@login_required
+def log_image(name: str):
+    path = ERROR_DIR / secure_filename(name)
+    if not path.exists() or path.parent.resolve() != ERROR_DIR.resolve():
+        return "not found", 404
+    return send_file(path)
+
+
+@app.route("/manual")
+@login_required
+def manual():
+    return render_page("manual", MANUAL_TEMPLATE)
 
 
 @app.route("/healthz")
@@ -167,56 +535,147 @@ def healthz():
     return {"ok": True, "app": "flask-blog-dashboard"}
 
 
+def _status() -> dict:
+    from modules.blogger_publisher import check_auth_status
+    from modules.content_generator import check_llm_status
+    from modules.naver_blog_poster import check_session_status
+    return {
+        "llm": check_llm_status(),
+        "blogger": check_auth_status(),
+        "naver": check_session_status(),
+        "image_provider": os.getenv("IMAGE_PROVIDER", "pollinations"),
+    }
+
+
+def render_login(error: str = ""):
+    return render_template_string(LOGIN_TEMPLATE, css=BASE_CSS, error=error, google_enabled=google_auth_configured(), password_enabled=is_password_configured())
+
+
+def render_page(active: str, body_template: str, **ctx):
+    body = render_template_string(body_template, active=active, **ctx)
+    return render_template_string(BASE_TEMPLATE, css=BASE_CSS, active=active, body=body, user=_current_user(), status=_status())
+
+
+BASE_CSS = """
+<style>
+:root { color-scheme: light; --ink:#172033; --muted:#657085; --line:#dde3ef; --panel:#fff; --bg:#f5f7fb; --nav:#111827; --blue:#2563eb; --green:#16a34a; --red:#dc2626; --amber:#b45309; }
+* { box-sizing: border-box; }
+body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); }
+a { color:#1d4ed8; }
+.shell { min-height:100vh; display:grid; grid-template-columns:248px 1fr; }
+aside { background:var(--nav); color:white; padding:18px 14px; position:sticky; top:0; height:100vh; overflow:auto; }
+aside h1 { font-size:18px; margin:0 0 4px; }
+aside .caption { color:#9ca3af; font-size:12px; margin-bottom:18px; }
+.nav-section { margin:18px 0 8px; color:#cbd5e1; font-size:13px; font-weight:700; }
+.nav-link { display:flex; gap:8px; align-items:center; color:#d1d5db; text-decoration:none; padding:10px 12px; border-radius:6px; margin:4px 0; }
+.nav-link:hover, .nav-link.active { background:#1f2937; color:white; }
+.status { border-top:1px solid #273244; margin-top:18px; padding-top:14px; font-size:12px; color:#cbd5e1; line-height:1.7; }
+main { padding:24px 28px 42px; max-width:1320px; width:100%; }
+.topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; }
+.topbar form { margin:0; }
+.panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:20px; margin:0 0 18px; }
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+.grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+.grid4 { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.header { background:#263a73; color:white; padding:12px 16px; border-radius:8px; font-weight:800; margin-bottom:16px; }
+.notice { background:#eff6ff; border-left:4px solid var(--blue); padding:12px 14px; border-radius:0 6px 6px 0; margin:10px 0; }
+.notice.success { background:#f0fdf4; border-left-color:var(--green); }
+.notice.error { background:#fef2f2; border-left-color:var(--red); }
+.notice.warn { background:#fffbeb; border-left-color:#f59e0b; }
+.flash { padding:10px 12px; border-radius:6px; margin:8px 0; background:#eff6ff; border:1px solid #bfdbfe; }
+.flash.success { background:#f0fdf4; border-color:#bbf7d0; }
+.flash.error { background:#fef2f2; border-color:#fecaca; }
+.btn, button { border:0; border-radius:6px; background:#374151; color:white; padding:9px 13px; font-weight:700; text-decoration:none; cursor:pointer; display:inline-block; }
+.btn.primary, button.primary { background:var(--blue); }
+.btn.success { background:var(--green); }
+.btn.danger { background:var(--red); }
+.btn.small, button.small { padding:6px 9px; font-size:12px; }
+input, select, textarea { width:100%; padding:9px 11px; border:1px solid #cfd7e6; border-radius:6px; background:white; font:inherit; }
+textarea { min-height:160px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+label { display:block; font-size:13px; font-weight:700; color:#334155; margin:10px 0 6px; }
+.inline { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.chip { display:inline-flex; align-items:center; gap:5px; background:#eef2ff; color:#3730a3; padding:5px 9px; border-radius:999px; font-size:13px; font-weight:700; margin:3px; }
+.checkbox-list { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.checkbox { border:1px solid var(--line); background:#fff; border-radius:6px; padding:9px; min-height:54px; }
+.preview { border:1px solid var(--line); border-radius:8px; padding:18px; background:#fff; overflow:auto; }
+.card { border:1px solid var(--line); border-radius:8px; padding:14px; background:#fff; }
+.muted { color:var(--muted); font-size:13px; }
+hr { border:0; border-top:1px solid var(--line); margin:18px 0; }
+code, pre { background:#f1f5f9; border-radius:5px; padding:2px 5px; }
+pre { padding:12px; overflow:auto; white-space:pre-wrap; }
+details { border:1px solid var(--line); border-radius:8px; padding:12px; background:#fff; margin:10px 0; }
+summary { cursor:pointer; font-weight:800; }
+.login { min-height:100vh; display:grid; place-items:center; padding:24px; }
+.login .panel { max-width:430px; width:100%; }
+@media (max-width:900px) { .shell { grid-template-columns:1fr; } aside { position:static; height:auto; } .grid2,.grid3,.grid4,.checkbox-list { grid-template-columns:1fr; } main { padding:16px; } }
+</style>
+"""
+
+BASE_TEMPLATE = """
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI 블로그 자동화</title>{{ css|safe }}</head>
+<body><div class="shell"><aside><h1>AI 블로그 자동화</h1><div class="caption">Trends → AI → Media → Publish</div>
+<div class="nav-section">프로세스</div>
+<a class="nav-link {{ 'active' if active=='trends' else '' }}" href="{{ url_for('trends') }}">📊 트렌드 수집</a>
+<a class="nav-link {{ 'active' if active=='content' else '' }}" href="{{ url_for('content') }}">✍️ 콘텐츠 작성</a>
+<a class="nav-link {{ 'active' if active=='media' else '' }}" href="{{ url_for('media') }}">🎨 미디어</a>
+<a class="nav-link {{ 'active' if active=='publish' else '' }}" href="{{ url_for('publish') }}">🚀 발행</a>
+<div class="nav-section">관리</div>
+<a class="nav-link {{ 'active' if active=='saved' else '' }}" href="{{ url_for('saved') }}">📂 저장된 글</a>
+<a class="nav-link {{ 'active' if active=='settings' else '' }}" href="{{ url_for('settings') }}">⚙️ 설정</a>
+<a class="nav-link {{ 'active' if active=='logs' else '' }}" href="{{ url_for('logs') }}">🪵 오류 로그</a>
+<a class="nav-link {{ 'active' if active=='manual' else '' }}" href="{{ url_for('manual') }}">📚 매뉴얼</a>
+<div class="status"><b>API 상태</b><br>{{ '✅' if status.llm.vllm_available else '❌' }} vLLM · {{ '✅' if status.llm.claude_available else '⚪' }} Claude<br>{{ '✅' if status.blogger.ready else '❌' }} Blogger · {{ '✅' if status.naver.ready else '❌' }} 네이버<br>🖼️ {{ status.image_provider }}</div>
+</aside><main><div class="topbar"><div class="muted">{{ user }} 로그인됨</div><form method="post" action="{{ url_for('logout') }}"><button class="small" type="submit">로그아웃</button></form></div>
+{% with messages = get_flashed_messages(with_categories=true) %}{% for cat,msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}{% endwith %}
+{{ body|safe }}</main></div></body></html>
+"""
+
 LOGIN_TEMPLATE = """
-<!doctype html>
-<html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>로그인</title>{{ css|safe }}</head>
-<body class="login">
-  <section class="panel">
-    <h2>로그인이 필요합니다</h2>
-    {% if error %}<p class="notice error">{{ error }}</p>{% endif %}
-    {% if google_enabled %}<p><a class="btn" href="{{ url_for('google_login') }}">구글 계정으로 로그인</a></p>{% endif %}
-    {% if password_enabled %}
-    <form method="post">
-      <label>비밀번호</label>
-      <input type="password" name="password" autocomplete="current-password" required>
-      <button class="btn secondary" type="submit">비밀번호로 로그인</button>
-    </form>
-    {% endif %}
-    {% if not google_enabled and not password_enabled %}<p class="notice error">로그인 설정이 없습니다. .env와 login_client_secret.json을 확인하세요.</p>{% endif %}
-  </section>
-</body>
-</html>
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI 블로그 자동화</title>{{ css|safe }}</head>
+<body class="login"><section class="panel"><h2>로그인이 필요합니다</h2>{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+{% if google_enabled %}<p><a class="btn primary" href="{{ url_for('google_login') }}">구글 계정으로 로그인</a></p>{% endif %}
+{% if password_enabled %}<form method="post"><label>비밀번호</label><input type="password" name="password" autocomplete="current-password" required><button class="primary" type="submit">비밀번호로 로그인</button></form>{% endif %}
+{% if not google_enabled and not password_enabled %}<p class="notice error">로그인 설정이 없습니다. .env의 APP_PASSWORD 또는 Google 로그인 설정을 확인하세요.</p>{% endif %}</section></body></html>
 """
 
-
-DASHBOARD_TEMPLATE = """
-<!doctype html>
-<html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI 블로그 자동화</title>{{ css|safe }}</head>
-<body>
-  <div class="shell">
-    <aside>
-      <h1>AI 블로그 자동화</h1>
-      <a href="{{ url_for('dashboard') }}">대시보드</a>
-      <a href="#">트렌드 수집</a>
-      <a href="#">콘텐츠 작성</a>
-      <a href="#">미디어</a>
-      <a href="#">발행</a>
-      <form method="post" action="{{ url_for('logout') }}" style="margin-top:22px"><button class="btn secondary" type="submit">로그아웃</button></form>
-    </aside>
-    <main>
-      <section class="panel">
-        <h2>Flask 전환 준비 완료</h2>
-        <p class="notice">{{ user }} 계정으로 로그인되었습니다. OAuth와 세션은 Flask에서 처리됩니다.</p>
-        <p>기존 Streamlit 화면의 기능을 이 Flask 화면으로 단계적으로 옮길 수 있습니다.</p>
-      </section>
-    </main>
-  </div>
-</body>
-</html>
+TRENDS_TEMPLATE = """
+<div class="header">📊 STEP 1 · 트렌드 수집</div>
+<div class="panel"><p class="notice">Google 트렌드, 네이버, signal.bz에서 실시간 키워드를 수집하거나 직접 입력합니다.</p><form method="post"><input type="hidden" name="action" value="collect"><button class="primary">트렌드 수집 시작</button></form></div>
+<div class="panel"><h3>수동 키워드 입력</h3><form method="post" class="inline"><input type="hidden" name="action" value="add_manual"><input name="manual_keywords" placeholder="예: 장윤정, 구속송치, 연예인 논란"><button>추가</button></form>{% for kw in ws.manual_keywords %}<form method="post" style="display:inline"><input type="hidden" name="action" value="remove_manual"><input type="hidden" name="keyword" value="{{ kw }}"><button class="small">✕ {{ kw }}</button></form>{% endfor %}{% if ws.manual_keywords %}<form method="post"><input type="hidden" name="action" value="clear_manual"><button class="small danger">수동 키워드 전체 초기화</button></form>{% endif %}</div>
+{% if ws.trends %}<form method="post"><input type="hidden" name="action" value="select_keywords"><div class="grid3"><div class="panel"><h3>네이버</h3>{% for kw in ws.trends.naver[:20] %}<p><code>{{ '%02d'|format(kw.rank) }}</code> <b>{{ kw.keyword }}</b> <span class="muted">{{ kw.caret }}</span></p>{% else %}<p class="muted">데이터 없음</p>{% endfor %}</div><div class="panel"><h3>구글</h3>{% for kw in ws.trends.google[:20] %}<p><code>{{ '%02d'|format(kw.rank|int) }}</code> <b>{{ kw.keyword }}</b> <span class="muted">{{ kw.traffic }}</span></p>{% else %}<p class="muted">데이터 없음</p>{% endfor %}</div><div class="panel"><h3>시그널</h3>{% for kw in ws.trends.signal[:20] %}<p><code>{{ '%02d'|format(kw.rank|int) }}</code> <b>{{ kw.keyword }}</b> <span class="muted">{{ kw.caret }}</span></p>{% else %}<p class="muted">데이터 없음</p>{% endfor %}</div></div><div class="panel"><h3>자동 수집 키워드 선택</h3><div class="checkbox-list">{% for kw in ws.trends.merged %}<label class="checkbox"><input type="checkbox" name="keywords" value="{{ kw.keyword }}" {% if kw.keyword in ws.selected_keywords %}checked{% endif %}> <b>{{ kw.keyword }}</b><br><span class="muted">{{ kw.source }} · {{ kw.traffic }} {{ kw.caret }}</span></label>{% endfor %}</div><hr><button class="primary">콘텐츠 작성으로 이동</button></div></form>{% endif %}
+{% if ws.selected_keywords %}<div class="panel"><b>선택된 키워드:</b> {% for kw in ws.selected_keywords %}<span class="chip">{{ kw }}</span>{% endfor %}</div>{% endif %}
 """
 
+CONTENT_TEMPLATE = """
+<div class="header">✍️ STEP 2 · 콘텐츠 작성</div>{% if not ws.selected_keywords %}<div class="notice warn">먼저 트렌드 수집에서 키워드를 선택해주세요.</div>{% else %}<div class="panel"><h3>2-1 · 주제 선정</h3><p>{% for kw in ws.selected_keywords %}<span class="chip">{{ kw }}</span>{% endfor %}</p><form method="post" class="inline"><input type="hidden" name="action" value="suggest_topics"><label>추천 주제 수 <input type="number" name="topic_count" value="5" min="3" max="8"></label><button class="primary">주제 추천 받기</button></form><form method="post"><input type="hidden" name="action" value="custom_title"><label>직접 제목 입력</label><div class="inline"><input name="post_title" value="{{ ws.post_title }}"><button>이 제목 사용</button></div></form></div>{% if ws.topics %}<div class="panel"><h3>추천 주제 목록</h3>{% for topic in ws.topics %}<div class="card"><h4>{{ loop.index }}. {{ topic.title }}</h4><p class="muted">{{ topic.topic }} · {{ topic.reason }}</p>{% for kw in topic.keywords %}<span class="chip">{{ kw }}</span>{% endfor %}<form method="post"><input type="hidden" name="action" value="select_topic"><input type="hidden" name="topic_index" value="{{ loop.index0 }}"><button class="primary small">선택</button></form></div>{% endfor %}</div>{% endif %}{% if ws.post_title %}<div class="panel"><h3>2-2 · 본문 생성</h3><form method="post"><input type="hidden" name="action" value="generate_post"><div class="grid3"><div><label>제목</label><input name="title" value="{{ ws.post_title }}"></div><div><label>톤앤매너</label><select name="tone"><option>정보전달</option><option>친근한</option><option>전문적</option><option>뉴스형</option></select></div><div><label>키워드</label><input name="keywords" value="{{ (ws.post_topic.keywords if ws.post_topic else ws.selected_keywords)|join(', ') }}"></div></div><button class="primary">본문 생성</button></form></div>{% endif %}{% if ws.post_content_html %}<div class="grid2"><div class="panel"><h3>본문 편집</h3><form method="post"><input type="hidden" name="action" value="save_edits"><label>제목</label><input name="title" value="{{ ws.post_title }}"><label>HTML 본문</label><textarea name="content_html" style="min-height:420px">{{ ws.post_content_html }}</textarea><label>태그</label><input name="tags" value="{{ ws.post_tags|join(', ') }}"><label>메타 설명</label><textarea name="meta_description" style="min-height:70px">{{ ws.post_meta_desc }}</textarea><button class="primary">저장</button></form><hr><form method="post"><input type="hidden" name="action" value="refine"><input type="hidden" name="content_html" value="{{ ws.post_content_html }}"><label>AI 수정 요청</label><input name="instruction" placeholder="예: 더 친근하게"><button>AI 수정 적용</button></form></div><div class="panel"><h3>미리보기</h3><div class="preview"><h2>{{ ws.post_title }}</h2>{{ ws.post_content_html|safe }}</div><p><a class="btn primary" href="{{ url_for('media') }}">미디어로 이동</a></p></div></div>{% endif %}{% endif %}
+"""
+
+MEDIA_TEMPLATE = """
+<div class="header">🎨 STEP 3 · 미디어</div>{% if not ws.post_content_html %}<div class="notice warn">먼저 콘텐츠 작성 단계를 완료해주세요.</div>{% else %}<div class="panel"><form method="post"><input type="hidden" name="action" value="generate_images"><label>이미지 생성 방식</label><select name="provider"><option value="pollinations">Pollinations.ai</option><option value="huggingface">HuggingFace SD XL</option><option value="claude">Claude + Pollinations</option><option value="dalle">DALL-E 3</option></select><div class="grid3">{% for i in range(3) %}<div><label>이미지 {{ i+1 }} 설명</label><input name="prompt_{{ i }}" value="{{ ws.image_prompts[i] if ws.image_prompts|length > i else ['blog post illustration','relevant image','article image'][i] }}"></div>{% endfor %}</div><button class="primary">이미지 생성 & 삽입</button></form><form method="post" style="margin-top:10px"><input type="hidden" name="action" value="skip"><button>이미지 건너뛰기</button></form></div>{% if ws.image_data %}<div class="panel"><h3>생성 결과</h3><div class="grid3">{% for item in ws.image_data %}<div class="card">{% if item.url %}<img src="{{ item.url }}" style="width:100%;border-radius:6px">{% endif %}<p class="muted">{{ item.provider or 'failed' }} · {{ item.prompt }}</p>{% if item.error %}<p class="notice error">{{ item.error }}</p>{% endif %}</div>{% endfor %}</div><p><a class="btn primary" href="{{ url_for('publish') }}">발행으로 이동</a></p></div>{% endif %}{% endif %}
+"""
+
+PUBLISH_TEMPLATE = """
+<div class="header">🚀 STEP 4 · 발행</div>{% if not final_html %}<div class="notice warn">콘텐츠를 먼저 작성해주세요.</div>{% else %}<div class="grid2"><div class="panel"><h3>최종 미리보기</h3><div class="preview"><h1>{{ ws.post_title }}</h1><p class="muted">태그: {{ ws.post_tags|join(', ') }}</p><hr>{{ final_html|safe }}</div></div><div class="panel"><h3>발행 설정</h3><form method="post"><label>제목 최종 확인</label><input name="title" value="{{ ws.post_title }}"><div class="grid2"><button name="action" value="save_local">로컬 저장</button><button name="action" value="blogger_draft">Blogger 임시저장</button><button class="primary" name="action" value="blogger_publish">구글 발행</button><button class="success" name="action" value="naver_publish">네이버 발행</button></div></form><hr><form method="post"><button name="action" value="refresh_recent">최근 Blogger 포스팅 새로고침</button></form><p><a href="{{ url_for('saved') }}">저장된 글 관리로 이동</a></p></div></div>{% endif %}{% if ws.publish_result %}<div class="panel"><h3>Blogger 결과</h3>{% if ws.publish_result.error %}<p class="notice error">{{ ws.publish_result.error }}</p>{% else %}<p class="notice success">성공: <a href="{{ ws.publish_result.url }}" target="_blank">{{ ws.publish_result.url }}</a></p>{% endif %}</div>{% endif %}{% if ws.naver_publish_result %}<div class="panel"><h3>네이버 결과</h3>{% if ws.naver_publish_result.error %}<p class="notice error">{{ ws.naver_publish_result.error }}</p>{% if ws.naver_publish_result.screenshot %}<p class="muted">스크린샷: {{ ws.naver_publish_result.screenshot }}</p>{% endif %}{% else %}<p class="notice success">성공: <a href="{{ ws.naver_publish_result.url }}" target="_blank">{{ ws.naver_publish_result.url }}</a></p>{% endif %}</div>{% endif %}{% if ws.blogger_recent_posts %}<div class="panel"><h3>최근 Blogger 포스팅</h3>{% for p in ws.blogger_recent_posts %}<div class="card inline"><span>{{ '🟢' if p.status == 'LIVE' else '📝' }}</span><a href="{{ p.url }}" target="_blank">{{ p.title }}</a><span class="muted">{{ p.published[:10] if p.published }}</span><form method="post"><input type="hidden" name="post_id" value="{{ p.id }}"><button class="small danger" name="action" value="delete_blogger">삭제</button></form></div>{% endfor %}</div>{% endif %}
+"""
+
+SAVED_TEMPLATE = """
+<div class="header">📂 저장된 글 관리</div>{% if not posts %}<div class="notice">저장된 글이 없습니다.</div>{% else %}<div class="panel"><p class="muted">총 {{ posts|length }}개의 저장된 글</p>{% for post in posts %}{% set data = post.data %}<details><summary>{{ data.title or post.name }} · {{ (data.saved_at or '')[:16].replace('T',' ') }}</summary><form method="post"><input type="hidden" name="action" value="update"><input type="hidden" name="file" value="{{ post.name }}"><input type="hidden" name="saved_at" value="{{ data.saved_at }}"><label>제목</label><input name="title" value="{{ data.title }}"><label>태그</label><input name="tags" value="{{ data.tags|join(', ') }}"><label>메타 설명</label><textarea name="meta_description" style="min-height:60px">{{ data.meta_description }}</textarea><label>본문 HTML</label><textarea name="content_html" style="min-height:260px">{{ data.content_html }}</textarea><button class="primary">저장</button></form><div class="inline" style="margin-top:8px"><form method="post"><input type="hidden" name="action" value="load"><input type="hidden" name="file" value="{{ post.name }}"><button>현재 글로 불러오기</button></form><form method="post"><input type="hidden" name="action" value="publish"><input type="hidden" name="file" value="{{ post.name }}"><button class="success">바로 Blogger 발행</button></form><form method="post"><input type="hidden" name="action" value="delete"><input type="hidden" name="file" value="{{ post.name }}"><button class="danger">삭제</button></form></div></details>{% endfor %}</div>{% endif %}
+"""
+
+SETTINGS_TEMPLATE = """
+<div class="header">⚙️ 설정</div><form method="post"><input type="hidden" name="action" value="save_env"><div class="grid2"><div class="panel"><h3>LLM / 이미지</h3><label>LLM 서버 주소</label><input name="llm_addr" value="{{ os.getenv('LLM_ADDR','') }}"><label>LLM 모델명</label><input name="llm_model" value="{{ os.getenv('LLM_MODEL','') }}"><label>LLM API Key</label><input name="llm_api_key" value="{{ os.getenv('LLM_API_KEY','EMPTY') }}"><label>Claude 모델</label><input name="claude_model" value="{{ os.getenv('CLAUDE_MODEL','claude-sonnet-4-6') }}"><label>이미지 생성 방식</label><select name="image_provider"><option value="pollinations">pollinations</option><option value="huggingface">huggingface</option><option value="claude">claude</option><option value="dalle">dalle</option></select><label>Anthropic API Key</label><input name="anthropic_key" value="{{ os.getenv('ANTHROPIC_API_KEY','') }}"><label>OpenAI API Key</label><input name="openai_key" value="{{ os.getenv('OPENAI_API_KEY','') }}"><label>HuggingFace Token</label><input name="hf_token" value="{{ os.getenv('HUGGINGFACE_TOKEN','') }}"></div><div class="panel"><h3>블로그 / 로그인</h3><label>Blogger Blog ID</label><input name="blogger_blog_id" value="{{ os.getenv('BLOGGER_BLOG_ID','') }}"><label>네이버 아이디</label><input name="naver_id" value="{{ os.getenv('NAVER_ID','') }}"><label>네이버 비밀번호</label><input name="naver_pw" value="{{ os.getenv('NAVER_PW','') }}"><label>네이버 블로그 ID</label><input name="naver_blog_id" value="{{ os.getenv('NAVER_BLOG_ID','') }}"><label>앱 접속 주소</label><input name="app_base_url" value="{{ os.getenv('APP_BASE_URL','https://blog.superip.net') }}"><label>허용 구글 이메일</label><input name="allowed_email" value="{{ os.getenv('ALLOWED_GOOGLE_EMAIL','') }}"><label>앱 비밀번호</label><input name="app_password" value="{{ os.getenv('APP_PASSWORD','') }}"><button class="primary">설정 저장</button></div></div></form><div class="grid2"><div class="panel"><h3>Google Blogger OAuth</h3><form method="post" enctype="multipart/form-data"><input type="hidden" name="action" value="upload_client_secret"><label>client_secret.json 업로드</label><input type="file" name="client_secret" accept=".json"><button>업로드</button></form><form method="post"><input type="hidden" name="action" value="oauth_reset"><button>토큰 재발급</button></form><form method="post"><input type="hidden" name="action" value="oauth_start"><label>리디렉션 URI</label><input name="redirect_uri" value="http://localhost"><button class="primary">인증 URL 생성</button></form>{% if ws.oauth_url %}<p class="notice">아래 URL을 열어 승인한 뒤, 리다이렉트 URL 또는 code 값을 붙여넣으세요.</p><pre>{{ ws.oauth_url }}</pre><form method="post"><input type="hidden" name="action" value="oauth_complete"><label>리다이렉트 URL 또는 code</label><input name="oauth_code"><button class="primary">인증 완료</button></form>{% endif %}<form method="post"><input type="hidden" name="action" value="blog_test"><input type="hidden" name="blogger_blog_id" value="{{ os.getenv('BLOGGER_BLOG_ID','') }}"><button>블로그 연결 테스트</button></form></div><div class="panel"><h3>앱 로그인 / 네이버 로그인</h3><form method="post" enctype="multipart/form-data"><input type="hidden" name="action" value="upload_login_secret"><label>login_client_secret.json 업로드</label><input type="file" name="login_client_secret" accept=".json"><button>업로드</button></form><hr><form method="post"><button class="primary" name="action" value="naver_login_start">네이버 로그인 시작</button></form>{% if ws.naver_login_state %}{% set ns = ws.naver_login_state %}{% if ns.status == 'success' %}<p class="notice success">네이버 로그인 성공. 세션이 저장되었습니다.</p>{% elif ns.status == 'challenge' %}<p class="notice warn">추가 인증이 필요합니다.</p><img src="data:image/png;base64,{{ ns.screenshot_b64 }}" style="max-width:100%;border:1px solid #ddd"><form method="post"><input type="hidden" name="action" value="naver_login_submit"><input type="hidden" name="session_id" value="{{ ns.session_id }}"><label>정답 입력</label><input name="answer"><button class="primary">제출</button></form><form method="post"><button name="action" value="naver_login_cancel">취소</button></form>{% elif ns.status == 'error' %}<p class="notice error">{{ ns.message }}</p>{% if ns.screenshot_b64 %}<img src="data:image/png;base64,{{ ns.screenshot_b64 }}" style="max-width:100%;border:1px solid #ddd">{% endif %}{% endif %}{% endif %}</div></div>
+"""
+
+LOGS_TEMPLATE = """
+<div class="header">🪵 오류 로그</div>{% if not shots %}<div class="notice">저장된 오류 스크린샷이 없습니다.</div>{% else %}<div class="panel"><p class="muted">총 {{ shots|length }}개</p>{% for shot in shots %}<details {% if loop.first %}open{% endif %}><summary>{{ shot.name }}</summary><img src="{{ url_for('log_image', name=shot.name) }}" style="max-width:100%;border:1px solid #ddd"><form method="post"><input type="hidden" name="file" value="{{ shot.name }}"><button class="danger">삭제</button></form></details>{% endfor %}</div>{% endif %}
+"""
+
+MANUAL_TEMPLATE = """
+<div class="header">📚 매뉴얼</div><div class="grid2"><div class="panel"><h3>사용 흐름</h3><ol><li>트렌드 수집에서 자동 키워드를 가져오거나 수동 키워드를 입력합니다.</li><li>콘텐츠 작성에서 주제를 추천받고 본문을 생성합니다.</li><li>미디어에서 이미지 3개를 생성해 본문에 삽입합니다.</li><li>발행에서 로컬 저장, Blogger 임시저장/발행, 네이버 발행을 실행합니다.</li></ol></div><div class="panel"><h3>OAuth 팁</h3><p>Blogger는 <code>client_secret.json</code> 업로드 후 인증 URL을 열고, 최종 주소창의 <code>code=</code> 값을 앱에 붙여넣으면 <code>token.json</code>이 저장됩니다.</p><p><code>redirect_uri_mismatch</code>가 나오면 Desktop app 타입 OAuth 클라이언트를 새로 만들거나 Web application의 Authorized redirect URIs에 같은 주소를 등록하세요.</p></div></div><div class="panel"><h3>기술 스택</h3><p>Flask, vLLM/OpenAI 호환 API, Claude fallback, Pollinations/HuggingFace/DALL-E, Google Blogger API v3, Playwright 기반 네이버 발행을 사용합니다.</p></div>
+"""
+
+# Jinja templates need os in settings.
+app.jinja_env.globals["os"] = os
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8501")))

@@ -37,16 +37,17 @@ fi
 
 echo "=== [5/5] systemd 서비스 등록 ==="
 # %i 를 실제 유저명으로 치환
-sed "s/%i/$DEPLOY_USER/g" blog-streamlit.service \
-  | sudo tee /etc/systemd/system/blog-streamlit.service > /dev/null
+sed "s/%i/$DEPLOY_USER/g" blog-flask.service \
+  | sudo tee /etc/systemd/system/blog-flask.service > /dev/null
+sudo systemctl disable --now blog-streamlit.service 2>/dev/null || true
 
 sudo systemctl daemon-reload
-sudo systemctl enable blog-streamlit.service
-sudo systemctl start blog-streamlit.service
+sudo systemctl enable blog-flask.service
+sudo systemctl start blog-flask.service
 
 echo ""
 echo "✅ 완료! 서비스 상태:"
-sudo systemctl status blog-streamlit.service --no-pager
+sudo systemctl status blog-flask.service --no-pager
 echo ""
 echo "📌 GitHub Actions에 아래 Secrets를 설정하세요:"
 echo "   DEPLOY_HOST  = 서버 IP"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# AI 블로그 자동화 대시보드 실행 스크립트
+# AI 블로그 자동화 대시보드 실행 스크립트 (Flask)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -10,5 +10,5 @@ if [ ! -d "venv" ]; then
 fi
 
 echo "🚀 AI 블로그 자동화 대시보드 시작..."
-echo "👉 브라우저에서 http://localhost:8501 접속"
-venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+echo "👉 브라우저에서 http://localhost:${PORT:-8501} 접속"
+venv/bin/python flask_app.py
