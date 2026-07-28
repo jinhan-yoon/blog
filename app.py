@@ -77,8 +77,12 @@ def _read_session_email() -> str | None:
     return verify_session_token(unquote(cookie_val))
 
 
-# ── 비밀번호 로그인 게이트 (단순, 외부 서비스 의존성 없음) ──────────────────────
-# 구글 OAuth 로그인은 invalid_grant 원인 불명으로 계속 실패해서 대신 도입.
+# 구글 OAuth를 기본으로 쓰되, invalid_grant 등으로 구글이 막히면 비밀번호
+# 로그인으로 대체할 수 있게 둘 다 코드는 유지. 동시에 두 게이트를 다 통과하게
+# 하면 번거로우니, 구글 게이트가 켜져있으면 비밀번호 게이트는 건너뛴다.
+_LOGIN_GATE_ENABLED = True
+
+# ── 비밀번호 로그인 게이트 (단순, 외부 서비스 의존성 없음 — 구글 로그인 안 될 때 대체용) ──
 from modules.app_auth import (
     is_password_configured as _password_configured,
     check_password,
@@ -86,7 +90,7 @@ from modules.app_auth import (
     verify_password_session_token,
 )
 
-if _password_configured():
+if _password_configured() and not _LOGIN_GATE_ENABLED:
     if "pw_authenticated" not in st.session_state:
         st.session_state.pw_authenticated = False
 
@@ -126,10 +130,7 @@ if _password_configured():
         else:
             st.stop()
 
-# 구글 OAuth 로그인이 계속 invalid_grant로 실패해서(원인 미해결) 임시로 꺼둠.
-# 원인 파악되면 아래를 다시 `if _auth_configured():`로 되돌리면 됨.
-_LOGIN_GATE_ENABLED = False
-
+# ── 구글 로그인 게이트 ────────────────────────────────────────────────────────
 if _LOGIN_GATE_ENABLED and _auth_configured():
     if "authenticated_email" not in st.session_state:
         st.session_state.authenticated_email = None
@@ -389,6 +390,14 @@ if st.session_state.get("authenticated_email") or st.session_state.get("pw_authe
                     _cookie_ctl.remove(SESSION_COOKIE_NAME)
                 except KeyError:
                     pass
+                # 주의: 쿠키 삭제 직후 st.rerun()을 바로 부르면 브라우저가 실제로
+                # 쿠키를 지우기 전에 스크립트가 재실행돼, 다음 로드 때 옛 쿠키가
+                # 아직 남아있어 로그아웃이 안 된 것처럼 보일 수 있다(로그인 때 겪은
+                # 것과 동일한 레이스). rerun 없이 자연스럽게 아래로 흘러가게 두고
+                # 안내만 표시한다.
+                st.success("✅ 로그아웃 되었습니다.")
+                st.info("🔄 새로고침하면 로그인 화면으로 돌아갑니다.")
+                st.stop()
                 st.rerun()
 
 # ════════════════════════════════════════════════════════
