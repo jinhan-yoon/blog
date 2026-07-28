@@ -7,7 +7,7 @@ Type=simple
 User=%i
 WorkingDirectory=/home/%i/blog
 EnvironmentFile=/home/%i/blog/.env
-Environment=PORT=8502
+Environment=PORT=8501
 ExecStart=/home/%i/blog/venv/bin/python flask_app.py
 Restart=on-failure
 RestartSec=5

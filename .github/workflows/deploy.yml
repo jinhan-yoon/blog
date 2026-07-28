@@ -69,7 +69,7 @@ jobs:
         run: |
           SERVICE=/etc/systemd/system/blog-streamlit.service
           sed "s|WorkingDirectory=.*|WorkingDirectory=$DEPLOY_PATH|g; \
-               s|ExecStart=.*|ExecStart=$DEPLOY_PATH/venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false|g; \
+               s|ExecStart=.*|ExecStart=$DEPLOY_PATH/venv/bin/streamlit run app.py --server.port 8502 --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false|g; \
                s|EnvironmentFile=.*|EnvironmentFile=$DEPLOY_PATH/.env|g; \
                /^User=/d" "$DEPLOY_PATH/blog-streamlit.service" \
             | sudo tee "$SERVICE" > /dev/null
