@@ -182,14 +182,18 @@ if _LOGIN_GATE_ENABLED and _auth_configured():
                 st.stop()
         else:
             st.title("🔒 로그인이 필요합니다")
-            # target="_self"를 명시해 새 탭/새 창이 아니라 현재 페이지에서 그대로 이동
+            # 사용자 확인: 같은 탭(target=_self)에서 열면 invalid_grant가 계속 나고,
+            # 예전에 새 창(target=_blank)으로 열었을 때는 정상 동작했다고 함 →
+            # 새 창 방식으로 되돌려 테스트. (모바일에서 새 탭이 자동으로 안 닫히는
+            # 문제가 있었던 이력이 있어 나중에 다시 문제되면 참고할 것)
             st.markdown(
-                f'<a href="{get_login_url(APP_BASE_URL)}" target="_self" '
+                f'<a href="{get_login_url(APP_BASE_URL)}" target="_blank" '
                 f'style="display:inline-block; padding:10px 18px; background:#4285F4; '
                 f'color:white; border-radius:8px; text-decoration:none; font-weight:600;">'
-                f'🔑 구글 계정으로 로그인</a>',
+                f'🔑 구글 계정으로 로그인 (새 창)</a>',
                 unsafe_allow_html=True,
             )
+            st.caption("로그인 후 새 창은 닫고, 이 탭으로 돌아와서 새로고침 해주세요.")
             st.stop()
 
 # ── 페이지 정의 ──────────────────────────────────────────────────────────────
