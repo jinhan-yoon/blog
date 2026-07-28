@@ -77,10 +77,10 @@ def _read_session_email() -> str | None:
     return verify_session_token(unquote(cookie_val))
 
 
-# 구글 OAuth를 기본으로 쓰되, invalid_grant 등으로 구글이 막히면 비밀번호
-# 로그인으로 대체할 수 있게 둘 다 코드는 유지. 동시에 두 게이트를 다 통과하게
-# 하면 번거로우니, 구글 게이트가 켜져있으면 비밀번호 게이트는 건너뛴다.
-_LOGIN_GATE_ENABLED = True
+# 구글 OAuth invalid_grant 원인을 리디렉션 URI/테스트 사용자/쿼터/JS 원본/
+# 새 창-같은 탭까지 다 확인해봐도 못 찾아 다시 끔. 비밀번호 로그인이 대신 활성화됨.
+# 원인 파악되면 True로 되돌리면 됨.
+_LOGIN_GATE_ENABLED = False
 
 # ── 비밀번호 로그인 게이트 (단순, 외부 서비스 의존성 없음 — 구글 로그인 안 될 때 대체용) ──
 from modules.app_auth import (
