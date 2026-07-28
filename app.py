@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import json
-import html
 import streamlit as st
 from dotenv import load_dotenv
 from pathlib import Path
@@ -261,18 +260,35 @@ if _LOGIN_GATE_ENABLED and _auth_configured():
                 _oauth_state_token,
                 OAUTH_STATE_TTL_SECONDS,
             )
-            _login_click = html.escape(
-                f"document.cookie = {json.dumps(_state_cookie)}; "
-                f"window.location.href = {json.dumps(_auth_url)};",
-                quote=True,
-            )
-            st.markdown(
-                f'<button type="button" onclick="{_login_click}" '
-                f'style="display:inline-block; padding:10px 18px; background:#4285F4; '
-                f'color:white; border:0; border-radius:8px; text-decoration:none; '
-                f'font-weight:600; cursor:pointer; font-size:1rem;">'
-                f'🔑 구글 계정으로 로그인</button>',
-                unsafe_allow_html=True,
+            _components_top.html(
+                f"""
+                <button id=\"google-login\" type=\"button\">구글 계정으로 로그인</button>
+                <style>
+                #google-login {{
+                    display: inline-block;
+                    padding: 10px 18px;
+                    background: #4285F4;
+                    color: white;
+                    border: 0;
+                    border-radius: 8px;
+                    text-decoration: none;
+                    font-weight: 600;
+                    cursor: pointer;
+                    font-size: 1rem;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                }}
+                #google-login:hover {{ background: #3367d6; }}
+                #google-login:active {{ transform: translateY(1px); }}
+                </style>
+                <script>
+                const button = document.getElementById('google-login');
+                button.addEventListener('click', function () {{
+                    window.parent.document.cookie = {json.dumps(_state_cookie)};
+                    window.parent.location.href = {json.dumps(_auth_url)};
+                }});
+                </script>
+                """,
+                height=54,
             )
             st.stop()
 
