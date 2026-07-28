@@ -274,9 +274,17 @@ def content():
         try:
             if action == "suggest_topics":
                 from modules.content_generator import suggest_topics
+                keywords = ws.get("selected_keywords") or []
+                if not keywords:
+                    flash("먼저 트렌드 수집에서 키워드를 선택하거나 수동 키워드를 확정해주세요.", "error")
+                    return redirect(url_for("trends"))
                 count = int(request.form.get("topic_count", "5"))
-                ws["topics"] = suggest_topics(ws["selected_keywords"], count)
-                flash("주제 추천이 완료되었습니다.", "success")
+                topics = suggest_topics(keywords, count)
+                ws["topics"] = topics
+                if topics:
+                    flash(f"주제 {len(topics)}개가 추천되었습니다.", "success")
+                else:
+                    flash("주제 추천 결과가 비어 있습니다. 키워드를 더 구체적으로 선택해 다시 시도해주세요.", "error")
             elif action == "select_topic":
                 idx = int(request.form.get("topic_index", "0"))
                 topic = (ws.get("topics") or [])[idx]
@@ -642,7 +650,9 @@ TRENDS_TEMPLATE = """
 <div class="header">📊 STEP 1 · 트렌드 수집</div>
 <div class="panel"><p class="notice">Google 트렌드, 네이버, signal.bz에서 실시간 키워드를 수집하거나 직접 입력합니다.</p><form method="post"><input type="hidden" name="action" value="collect"><button class="primary">트렌드 수집 시작</button></form></div>
 <div class="panel"><h3>수동 키워드 입력</h3><form method="post" class="inline"><input type="hidden" name="action" value="add_manual"><input name="manual_keywords" placeholder="예: 장윤정, 구속송치, 연예인 논란"><button>추가</button></form>{% for kw in ws.manual_keywords %}<form method="post" style="display:inline"><input type="hidden" name="action" value="remove_manual"><input type="hidden" name="keyword" value="{{ kw }}"><button class="small">✕ {{ kw }}</button></form>{% endfor %}{% if ws.manual_keywords %}<form method="post"><input type="hidden" name="action" value="clear_manual"><button class="small danger">수동 키워드 전체 초기화</button></form>{% endif %}</div>
-{% if ws.trends %}<form method="post"><input type="hidden" name="action" value="select_keywords"><div class="grid3"><div class="panel"><h3>네이버</h3>{% for kw in ws.trends.naver[:20] %}<p><code>{{ '%02d'|format(kw.rank) }}</code> <b>{{ kw.keyword }}</b> <span class="muted">{{ kw.caret }}</span></p>{% else %}<p class="muted">데이터 없음</p>{% endfor %}</div><div class="panel"><h3>구글</h3>{% for kw in ws.trends.google[:20] %}<p><code>{{ '%02d'|format(kw.rank|int) }}</code> <b>{{ kw.keyword }}</b> <span class="muted">{{ kw.traffic }}</span></p>{% else %}<p class="muted">데이터 없음</p>{% endfor %}</div><div class="panel"><h3>시그널</h3>{% for kw in ws.trends.signal[:20] %}<p><code>{{ '%02d'|format(kw.rank|int) }}</code> <b>{{ kw.keyword }}</b> <span class="muted">{{ kw.caret }}</span></p>{% else %}<p class="muted">데이터 없음</p>{% endfor %}</div></div><div class="panel"><h3>자동 수집 키워드 선택</h3><div class="checkbox-list">{% for kw in ws.trends.merged %}<label class="checkbox"><input type="checkbox" name="keywords" value="{{ kw.keyword }}" {% if kw.keyword in ws.selected_keywords %}checked{% endif %}> <b>{{ kw.keyword }}</b><br><span class="muted">{{ kw.source }} · {{ kw.traffic }} {{ kw.caret }}</span></label>{% endfor %}</div><hr><button class="primary">콘텐츠 작성으로 이동</button></div></form>{% endif %}
+<form method="post"><input type="hidden" name="action" value="select_keywords">
+{% if ws.trends %}<div class="grid3"><div class="panel"><h3>네이버</h3>{% for kw in ws.trends.naver[:20] %}<p><code>{{ '%02d'|format(kw.rank) }}</code> <b>{{ kw.keyword }}</b> <span class="muted">{{ kw.caret }}</span></p>{% else %}<p class="muted">데이터 없음</p>{% endfor %}</div><div class="panel"><h3>구글</h3>{% for kw in ws.trends.google[:20] %}<p><code>{{ '%02d'|format(kw.rank|int) }}</code> <b>{{ kw.keyword }}</b> <span class="muted">{{ kw.traffic }}</span></p>{% else %}<p class="muted">데이터 없음</p>{% endfor %}</div><div class="panel"><h3>시그널</h3>{% for kw in ws.trends.signal[:20] %}<p><code>{{ '%02d'|format(kw.rank|int) }}</code> <b>{{ kw.keyword }}</b> <span class="muted">{{ kw.caret }}</span></p>{% else %}<p class="muted">데이터 없음</p>{% endfor %}</div></div><div class="panel"><h3>자동 수집 키워드 선택</h3><div class="checkbox-list">{% for kw in ws.trends.merged %}<label class="checkbox"><input type="checkbox" name="keywords" value="{{ kw.keyword }}" {% if kw.keyword in ws.selected_keywords %}checked{% endif %}> <b>{{ kw.keyword }}</b><br><span class="muted">{{ kw.source }} · {{ kw.traffic }} {{ kw.caret }}</span></label>{% endfor %}</div></div>{% endif %}
+{% if ws.manual_keywords or ws.trends %}<div class="panel"><h3>키워드 확정</h3>{% if ws.manual_keywords %}<p class="muted">수동 키워드는 자동으로 포함됩니다.</p>{% for kw in ws.manual_keywords %}<span class="chip">{{ kw }}</span>{% endfor %}{% endif %}<hr><button class="primary">선택한 키워드로 콘텐츠 작성</button></div>{% endif %}</form>
 {% if ws.selected_keywords %}<div class="panel"><b>선택된 키워드:</b> {% for kw in ws.selected_keywords %}<span class="chip">{{ kw }}</span>{% endfor %}</div>{% endif %}
 """
 
