@@ -65,7 +65,7 @@ jobs:
           # Playwright 브라우저 캐시도 root의 홈(/root/.cache/ms-playwright)에 설치해야 함
           sudo venv/bin/playwright install chromium || echo "⚠️ playwright chromium 설치 실패 — 네이버 발행 기능에 영향 있을 수 있음, 서버에서 수동 확인 필요"
 
-      - name: Register systemd service
+      - name: Register Streamlit systemd service
         run: |
           SERVICE=/etc/systemd/system/blog-streamlit.service
           sed "s|WorkingDirectory=.*|WorkingDirectory=$DEPLOY_PATH|g; \
@@ -76,6 +76,17 @@ jobs:
           sudo systemctl daemon-reload
           sudo systemctl enable blog-streamlit.service
 
+      - name: Register Flask systemd service
+        run: |
+          SERVICE=/etc/systemd/system/blog-flask.service
+          sed "s|WorkingDirectory=.*|WorkingDirectory=$DEPLOY_PATH|g; \
+               s|ExecStart=.*|ExecStart=$DEPLOY_PATH/venv/bin/python flask_app.py|g; \
+               s|EnvironmentFile=.*|EnvironmentFile=$DEPLOY_PATH/.env|g; \
+               /^User=/d" "$DEPLOY_PATH/blog-flask.service" \
+            | sudo tee "$SERVICE" > /dev/null
+          sudo systemctl daemon-reload
+          sudo systemctl enable blog-flask.service
+
       - name: Ensure .env exists
         run: |
           if [ ! -f "$DEPLOY_PATH/.env" ]; then
@@ -83,8 +94,10 @@ jobs:
             echo "⚠️ .env 가 없어 .env.example 에서 복사했습니다. 실제 값을 설정해주세요."
           fi
 
-      - name: Restart service
+      - name: Restart services
         run: |
           sudo systemctl restart blog-streamlit.service
+          sudo systemctl restart blog-flask.service
           sleep 3
           sudo systemctl is-active blog-streamlit.service && echo "✅ blog-streamlit 서비스 정상 실행"
+          sudo systemctl is-active blog-flask.service && echo "✅ blog-flask 서비스 정상 실행"
