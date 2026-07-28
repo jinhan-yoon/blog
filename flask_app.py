@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import secrets
+import threading
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -65,6 +66,8 @@ DEFAULT_WORKSPACE = {
     "final_html": "",
     "publish_result": None,
     "naver_publish_result": None,
+    "naver_publish_running": False,
+    "naver_publish_log": [],
     "publish_history": [],
     "blogger_recent_posts": None,
     "oauth_url": None,
@@ -382,9 +385,29 @@ def publish():
                     ws["publish_history"].append(result)
                 flash("Blogger 작업이 완료되었습니다.", "success")
             elif action == "naver_publish":
-                from modules.naver_blog_poster import publish_post as naver_publish_post
-                ws["naver_publish_result"] = naver_publish_post(title, final_html, ws.get("post_tags", []))
-                flash("네이버 발행 작업이 완료되었습니다.", "success")
+                if ws.get("naver_publish_running"):
+                    flash("이미 네이버 발행이 진행 중입니다.", "error")
+                else:
+                    from modules.naver_blog_poster import publish_post as naver_publish_post
+                    ws["naver_publish_log"] = []
+                    ws["naver_publish_result"] = None
+                    ws["naver_publish_running"] = True
+                    tags = ws.get("post_tags", [])
+
+                    def _run_naver_publish(ws=ws, title=title, final_html=final_html, tags=tags):
+                        def _on_log(msg):
+                            ws["naver_publish_log"].append(msg)
+                        try:
+                            ws["naver_publish_result"] = naver_publish_post(
+                                title, final_html, tags, log_callback=_on_log
+                            )
+                        except Exception as exc:
+                            ws["naver_publish_result"] = {"url": None, "error": str(exc), "screenshot": None}
+                        finally:
+                            ws["naver_publish_running"] = False
+
+                    threading.Thread(target=_run_naver_publish, daemon=True).start()
+                    flash("네이버 발행을 시작했습니다. 진행 상황이 아래에 표시됩니다.", "success")
             elif action == "refresh_recent":
                 from modules.blogger_publisher import list_recent_posts
                 ws["blogger_recent_posts"] = list_recent_posts()
@@ -641,9 +664,13 @@ summary { cursor:pointer; font-weight:800; }
   .nav-toggle-checkbox:checked ~ .nav-backdrop {
     display:block; position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:999;
   }
-  main { padding:72px 16px 32px; }
+  main { padding:16px 16px 32px; }
   .grid2, .grid3, .grid4, .checkbox-list { grid-template-columns:1fr; }
-  .topbar { padding-left:52px; }
+  .topbar .nav-toggle-label {
+    display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto;
+    width:38px; height:38px; border-radius:8px;
+    background:var(--nav); color:white; font-size:18px; cursor:pointer;
+  }
   .btn, button { min-height:44px; padding:11px 16px; }
   .btn.small, button.small { min-height:38px; }
   input, select, textarea { min-height:44px; font-size:16px; } /* 16px: iOS 자동 확대 방지 */
@@ -655,7 +682,6 @@ BASE_TEMPLATE = """
 <!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI 블로그 자동화</title>{{ css|safe }}</head>
 <body><div class="shell">
 <input type="checkbox" id="nav-toggle" class="nav-toggle-checkbox">
-<label for="nav-toggle" class="nav-toggle-label" aria-label="메뉴 열기">☰</label>
 <label for="nav-toggle" class="nav-backdrop" aria-label="메뉴 닫기"></label>
 <aside><h1>AI 블로그 자동화</h1><div class="caption">Trends → AI → Media → Publish</div>
 <div class="nav-section">프로세스</div>
@@ -669,7 +695,7 @@ BASE_TEMPLATE = """
 <a class="nav-link {{ 'active' if active=='logs' else '' }}" href="{{ url_for('logs') }}">🪵 오류 로그</a>
 <a class="nav-link {{ 'active' if active=='manual' else '' }}" href="{{ url_for('manual') }}">📚 매뉴얼</a>
 <div class="status"><b>API 상태</b><br>{{ '✅' if status.llm.vllm_available else '❌' }} vLLM · {{ '✅' if status.llm.claude_available else '⚪' }} Claude<br>{{ '✅' if status.blogger.ready else '❌' }} Blogger · {{ '✅' if status.naver.ready else '❌' }} 네이버<br>🖼️ {{ status.image_provider }}</div>
-</aside><main><div class="topbar"><div class="muted">{{ user }} 로그인됨</div><form method="post" action="{{ url_for('logout') }}"><button class="small" type="submit">로그아웃</button></form></div>
+</aside><main><div class="topbar"><label for="nav-toggle" class="nav-toggle-label" aria-label="메뉴 열기">☰</label><div class="inline" style="margin-left:auto"><div class="muted">{{ user }} 로그인됨</div><form method="post" action="{{ url_for('logout') }}"><button class="small" type="submit">로그아웃</button></form></div></div>
 {% with messages = get_flashed_messages(with_categories=true) %}{% for cat,msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}{% endwith %}
 {{ body|safe }}</main></div></body></html>
 """
@@ -701,7 +727,7 @@ MEDIA_TEMPLATE = """
 """
 
 PUBLISH_TEMPLATE = """
-<div class="header">🚀 STEP 4 · 발행</div>{% if not final_html %}<div class="notice warn">콘텐츠를 먼저 작성해주세요.</div>{% else %}<div class="grid2"><div class="panel"><h3>최종 미리보기</h3><div class="preview"><h1>{{ ws.post_title }}</h1><p class="muted">태그: {{ ws.post_tags|join(', ') }}</p><hr>{{ final_html|safe }}</div></div><div class="panel"><h3>발행 설정</h3><form method="post"><label>제목 최종 확인</label><input name="title" value="{{ ws.post_title }}"><div class="grid2"><button name="action" value="save_local">로컬 저장</button><button name="action" value="blogger_draft">Blogger 임시저장</button><button class="primary" name="action" value="blogger_publish">구글 발행</button><button class="success" name="action" value="naver_publish">네이버 발행</button></div></form><hr><form method="post"><button name="action" value="refresh_recent">최근 Blogger 포스팅 새로고침</button></form><p><a href="{{ url_for('saved') }}">저장된 글 관리로 이동</a></p></div></div>{% endif %}{% if ws.publish_result %}<div class="panel"><h3>Blogger 결과</h3>{% if ws.publish_result.error %}<p class="notice error">{{ ws.publish_result.error }}</p>{% else %}<p class="notice success">성공: <a href="{{ ws.publish_result.url }}" target="_blank">{{ ws.publish_result.url }}</a></p>{% endif %}</div>{% endif %}{% if ws.naver_publish_result %}<div class="panel"><h3>네이버 결과</h3>{% if ws.naver_publish_result.error %}<p class="notice error">{{ ws.naver_publish_result.error }}</p>{% if ws.naver_publish_result.screenshot %}<p class="muted">스크린샷: {{ ws.naver_publish_result.screenshot }}</p>{% endif %}{% else %}<p class="notice success">성공: <a href="{{ ws.naver_publish_result.url }}" target="_blank">{{ ws.naver_publish_result.url }}</a></p>{% endif %}</div>{% endif %}{% if ws.blogger_recent_posts %}<div class="panel"><h3>최근 Blogger 포스팅</h3>{% for p in ws.blogger_recent_posts %}<div class="card inline"><span>{{ '🟢' if p.status == 'LIVE' else '📝' }}</span><a href="{{ p.url }}" target="_blank">{{ p.title }}</a><span class="muted">{{ p.published[:10] if p.published }}</span><form method="post"><input type="hidden" name="post_id" value="{{ p.id }}"><button class="small danger" name="action" value="delete_blogger">삭제</button></form></div>{% endfor %}</div>{% endif %}
+<div class="header">🚀 STEP 4 · 발행</div>{% if not final_html %}<div class="notice warn">콘텐츠를 먼저 작성해주세요.</div>{% else %}<div class="grid2"><div class="panel"><h3>최종 미리보기</h3><div class="preview"><h1>{{ ws.post_title }}</h1><p class="muted">태그: {{ ws.post_tags|join(', ') }}</p><hr>{{ final_html|safe }}</div></div><div class="panel"><h3>발행 설정</h3><form method="post"><label>제목 최종 확인</label><input name="title" value="{{ ws.post_title }}"><div class="grid2"><button name="action" value="save_local">로컬 저장</button><button name="action" value="blogger_draft">Blogger 임시저장</button><button class="primary" name="action" value="blogger_publish">구글 발행</button><button class="success" name="action" value="naver_publish">네이버 발행</button></div></form><hr><form method="post"><button name="action" value="refresh_recent">최근 Blogger 포스팅 새로고침</button></form><p><a href="{{ url_for('saved') }}">저장된 글 관리로 이동</a></p></div></div>{% endif %}{% if ws.publish_result %}<div class="panel"><h3>Blogger 결과</h3>{% if ws.publish_result.error %}<p class="notice error">{{ ws.publish_result.error }}</p>{% else %}<p class="notice success">성공: <a href="{{ ws.publish_result.url }}" target="_blank">{{ ws.publish_result.url }}</a></p>{% endif %}</div>{% endif %}{% if ws.naver_publish_running %}<div class="panel"><h3>🟢 네이버 발행 진행 중...</h3><pre>{{ ws.naver_publish_log|join('\n') if ws.naver_publish_log else '시작하는 중...' }}</pre><p class="muted">보통 30초~1분 정도 걸립니다. 이 화면은 2초마다 자동으로 새로고침됩니다.</p><script>setTimeout(function(){ location.reload(); }, 2000);</script></div>{% endif %}{% if ws.naver_publish_result %}<div class="panel"><h3>네이버 결과</h3>{% if ws.naver_publish_result.error %}<p class="notice error">{{ ws.naver_publish_result.error }}</p>{% if ws.naver_publish_result.screenshot %}<p class="muted">스크린샷: {{ ws.naver_publish_result.screenshot }}</p>{% endif %}{% else %}<p class="notice success">성공: <a href="{{ ws.naver_publish_result.url }}" target="_blank">{{ ws.naver_publish_result.url }}</a></p>{% endif %}</div>{% endif %}{% if ws.blogger_recent_posts %}<div class="panel"><h3>최근 Blogger 포스팅</h3>{% for p in ws.blogger_recent_posts %}<div class="card inline"><span>{{ '🟢' if p.status == 'LIVE' else '📝' }}</span><a href="{{ p.url }}" target="_blank">{{ p.title }}</a><span class="muted">{{ p.published[:10] if p.published }}</span><form method="post"><input type="hidden" name="post_id" value="{{ p.id }}"><button class="small danger" name="action" value="delete_blogger">삭제</button></form></div>{% endfor %}</div>{% endif %}
 """
 
 SAVED_TEMPLATE = """
@@ -724,4 +750,6 @@ MANUAL_TEMPLATE = """
 app.jinja_env.globals["os"] = os
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8501")))
+    # threaded=True: 네이버 발행을 백그라운드 스레드로 돌리고 그 사이 진행 상황
+    # 페이지를 폴링(2초 새로고침)하려면 동시에 여러 요청을 처리할 수 있어야 함
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8501")), threaded=True)
