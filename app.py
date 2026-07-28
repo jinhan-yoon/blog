@@ -255,40 +255,17 @@ if _LOGIN_GATE_ENABLED and _auth_configured():
         else:
             st.title("🔒 로그인이 필요합니다")
             _auth_url, _oauth_state_token = get_login_request(APP_BASE_URL)
-            _state_cookie = _browser_cookie_string(
+            _write_browser_cookie(
                 OAUTH_STATE_COOKIE_NAME,
                 _oauth_state_token,
                 OAUTH_STATE_TTL_SECONDS,
             )
-            _components_top.html(
-                f"""
-                <button id=\"google-login\" type=\"button\">구글 계정으로 로그인</button>
-                <style>
-                #google-login {{
-                    display: inline-block;
-                    padding: 10px 18px;
-                    background: #4285F4;
-                    color: white;
-                    border: 0;
-                    border-radius: 8px;
-                    text-decoration: none;
-                    font-weight: 600;
-                    cursor: pointer;
-                    font-size: 1rem;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-                }}
-                #google-login:hover {{ background: #3367d6; }}
-                #google-login:active {{ transform: translateY(1px); }}
-                </style>
-                <script>
-                const button = document.getElementById('google-login');
-                button.addEventListener('click', function () {{
-                    window.parent.document.cookie = {json.dumps(_state_cookie)};
-                    window.parent.location.href = {json.dumps(_auth_url)};
-                }});
-                </script>
-                """,
-                height=54,
+            st.markdown(
+                f'<a href="{_auth_url}" target="_self" '
+                f'style="display:inline-block; padding:10px 18px; background:#4285F4; '
+                f'color:white; border-radius:8px; text-decoration:none; font-weight:600;">'
+                f'구글 계정으로 로그인</a>',
+                unsafe_allow_html=True,
             )
             st.stop()
 
