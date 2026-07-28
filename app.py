@@ -77,10 +77,9 @@ def _read_session_email() -> str | None:
     return verify_session_token(unquote(cookie_val))
 
 
-# 구글 OAuth invalid_grant 원인을 리디렉션 URI/테스트 사용자/쿼터/JS 원본/
-# 새 창-같은 탭까지 다 확인해봐도 못 찾아 다시 끔. 비밀번호 로그인이 대신 활성화됨.
-# 원인 파악되면 True로 되돌리면 됨.
-_LOGIN_GATE_ENABLED = False
+# 구글 OAuth invalid_grant 원인 조사 중 (콘솔 설정은 다 확인함). 계속 구글로
+# 시도하기 위해 켜둔 상태 유지. debug_google_login.py로 원인 추적 중.
+_LOGIN_GATE_ENABLED = True
 
 # ── 비밀번호 로그인 게이트 (단순, 외부 서비스 의존성 없음 — 구글 로그인 안 될 때 대체용) ──
 from modules.app_auth import (
