@@ -214,24 +214,28 @@ python naver_setup.py --headless
 
 ## 🔒 앱 로그인 게이트
 
-### ✅ 현재 사용 중: 비밀번호 방식 (2026-07-27~)
+### ✅ 현재 사용 중: 구글 계정 방식 (2026-07-28~ 재활성화)
 
-구글 OAuth가 원인 불명의 `invalid_grant`로 계속 실패해서, 외부 서비스 의존이 없는
-단순 비밀번호 로그인으로 대체했습니다. 관리자 1명만 쓰는 도구라 이 방식으로 충분합니다.
+`app.py`의 `_LOGIN_GATE_ENABLED = True`로 다시 켜져 있습니다. 원인 불명의
+`invalid_grant`가 하루 종일 반복돼 한때 꺼뒀었지만(README 하단 "현재 상태"
+섹션 참고), 사용자 요청으로 재활성화함 — 재현되는지는 계속 지켜봐야 함.
 
-**설정 방법**: 서버의 `.env`에 `APP_PASSWORD=원하는_비밀번호`를 추가하고 서비스를
-재시작(또는 재배포)하면 즉시 로그인 화면이 뜹니다. 비워두면(미설정) 로그인 없이
-누구나 접근 가능하니 꼭 설정하세요.
+### 🔁 대체 수단: 비밀번호 방식
 
-- 로그인 상태는 서명된 쿠키(`blog_auth_token`, 30일)로 유지되며 서버 재시작/새로고침에도 안 풀립니다.
-- 구현: `modules/app_auth.py`의 `check_password()` / `make_password_session_token()` / `verify_password_session_token()`, `app.py` 상단의 비밀번호 로그인 게이트 블록.
-- 로그아웃: 우측 상단 "👤 관리자" 클릭 → 로그아웃.
+구글 로그인이 또 막히면 쓸 수 있도록 비밀번호 로그인도 코드로 남겨뒀습니다.
+**구글 게이트가 켜져 있는 동안은 자동으로 건너뛰어지므로(`app.py`의
+`_password_configured() and not _LOGIN_GATE_ENABLED` 조건)**, 지금은 `.env`에
+`APP_PASSWORD`를 설정해도 비밀번호 화면이 뜨지 않습니다. 구글이 다시 막히면
+`app.py`의 `_LOGIN_GATE_ENABLED = False`로 바꾸면 즉시 비밀번호 방식으로 전환됩니다.
 
-### 🅾️ 대안 (현재 비활성화): 구글 계정 방식
+- 설정: 서버 `.env`에 `APP_PASSWORD=원하는_비밀번호` 추가 후 재배포/재시작.
+- 로그인 상태는 서명된 쿠키(`blog_auth_token`, 30일)로 유지.
+- 구현: `modules/app_auth.py`의 `check_password()` / `make_password_session_token()` / `verify_password_session_token()`.
+- 로그아웃 시 쿠키 삭제 직후 rerun하면 삭제가 브라우저에 반영되기 전이라 로그아웃이
+  안 된 것처럼 보이는 레이스가 있어(구글 로그인 때와 동일 원인), rerun 대신 새로고침
+  안내 메시지로 처리하도록 고쳐둠.
 
-지정된 구글 계정만 이 앱에 접근할 수 있도록 로그인 화면을 추가할 수 있습니다.
-`app.py`의 `_LOGIN_GATE_ENABLED = False`로 꺼둔 상태이며, `True`로 바꾸면 재활성화됩니다
-(단, 아래 "현재 상태" 섹션의 미해결 `invalid_grant` 문제부터 먼저 해결 필요).
+### 🔧 구글 계정 방식 설정 방법
 
 #### 1. Google Cloud Console에서 별도 OAuth 클라이언트 생성
 
