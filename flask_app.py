@@ -668,11 +668,16 @@ summary { cursor:pointer; font-weight:800; }
   .grid2, .grid3, .grid4, .checkbox-list { grid-template-columns:1fr; }
   .topbar .nav-toggle-label {
     display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto;
-    width:38px; height:38px; border-radius:8px;
+    width:38px; height:38px; border-radius:8px; line-height:1;
     background:var(--nav); color:white; font-size:18px; cursor:pointer;
   }
   .btn, button { min-height:44px; padding:11px 16px; }
   .btn.small, button.small { min-height:38px; }
+  /* 햄버거 버튼과 로그아웃 버튼 높이를 픽셀 단위로 정확히 맞춤 */
+  .topbar .nav-toggle-label, .topbar button.small {
+    height:38px; min-height:38px; box-sizing:border-box;
+    display:inline-flex; align-items:center; justify-content:center; line-height:1;
+  }
   input, select, textarea { min-height:44px; font-size:16px; } /* 16px: iOS 자동 확대 방지 */
 }
 </style>
