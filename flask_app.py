@@ -136,10 +136,16 @@ def _tags_from_text(text: str) -> list[str]:
 
 
 def _safe_saved_path(name: str) -> Path:
+    # werkzeug의 secure_filename()은 한글 등 비-ASCII 문자를 제거해버려서,
+    # 저장할 때 한글 제목이 그대로 들어간 실제 파일명과 불러올 때 이름이
+    # 어긋나는 문제가 있었음 (예: "20260729_...구마모토강진.json" ->
+    # "20260729_.json"). 경로 조작만 막고 유니코드 파일명은 그대로 허용한다.
     DATA_DIR.mkdir(exist_ok=True)
-    safe = secure_filename(name)
-    path = DATA_DIR / safe
-    if path.parent.resolve() != DATA_DIR.resolve() or path.suffix != ".json":
+    name = (name or "").strip()
+    if not name or "/" in name or "\\" in name or name.startswith(".") or not name.endswith(".json"):
+        raise ValueError("잘못된 파일명입니다.")
+    path = DATA_DIR / name
+    if path.parent.resolve() != DATA_DIR.resolve():
         raise ValueError("잘못된 파일명입니다.")
     return path
 
