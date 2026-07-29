@@ -649,13 +649,6 @@ summary { cursor:pointer; font-weight:800; }
 /* ── 모바일: 접이식 사이드바 (체크박스 해크, JS 불필요) ── */
 @media (max-width:900px) {
   .shell { grid-template-columns:1fr; }
-  .nav-toggle-label {
-    display:flex; align-items:center; justify-content:center;
-    position:fixed; top:14px; left:14px; z-index:1001;
-    width:44px; height:44px; border-radius:10px;
-    background:var(--nav); color:white; font-size:20px;
-    box-shadow:var(--shadow); cursor:pointer;
-  }
   aside {
     position:fixed; top:0; left:0; height:100vh; width:264px; z-index:1000;
     transform:translateX(-100%); box-shadow:2px 0 16px rgba(0,0,0,.25);
@@ -666,15 +659,16 @@ summary { cursor:pointer; font-weight:800; }
   }
   main { padding:16px 16px 32px; }
   .grid2, .grid3, .grid4, .checkbox-list { grid-template-columns:1fr; }
+  /* 햄버거 버튼: topbar 안의 일반 flex 아이템으로 배치 (더 이상 position:fixed 아님) */
   .topbar .nav-toggle-label {
     display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto;
-    width:38px; height:38px; border-radius:8px; line-height:1;
+    width:38px; height:38px; border-radius:8px; line-height:1; box-sizing:border-box;
     background:var(--nav); color:white; font-size:18px; cursor:pointer;
   }
   .btn, button { min-height:44px; padding:11px 16px; }
   .btn.small, button.small { min-height:38px; }
-  /* 햄버거 버튼과 로그아웃 버튼 높이를 픽셀 단위로 정확히 맞춤 */
-  .topbar .nav-toggle-label, .topbar button.small {
+  /* 로그아웃 버튼을 햄버거와 같은 38px 높이로 맞춤 */
+  .topbar button.small {
     height:38px; min-height:38px; box-sizing:border-box;
     display:inline-flex; align-items:center; justify-content:center; line-height:1;
   }
