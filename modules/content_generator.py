@@ -58,12 +58,43 @@ def _search_naver_news(keyword: str, limit: int = 4) -> list[dict]:
         return []
 
 
+def _search_foreign_news(keyword: str, limit: int = 3) -> list[dict]:
+    """Google News RSS(영어판)에서 해외 매체 기사 제목·요약을 가져와 콘텐츠에 풍부함을 더한다."""
+    try:
+        resp = _requests.get(
+            "https://news.google.com/rss/search",
+            params={"q": keyword, "hl": "en-US", "gl": "US", "ceid": "US:en"},
+            headers=_SEARCH_HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        soup = _BeautifulSoup(resp.content, "lxml-xml")
+        items = soup.find_all("item")
+
+        results = []
+        for item in items[:limit]:
+            title_tag = item.find("title")
+            source_tag = item.find("source")
+            if not title_tag or not title_tag.text.strip():
+                continue
+            results.append({
+                "title": title_tag.text.strip(),
+                "summary": "",
+                "source_name": source_tag.text.strip() if source_tag else "",
+            })
+        return results
+    except Exception:
+        return []
+
+
 def research_keywords(keywords: list[str], per_keyword: int = 3) -> list[dict]:
-    """키워드별 실제 뉴스 검색 결과 수집 (실패해도 빈 리스트 반환, 생성 자체는 계속 진행됨)"""
+    """키워드별 실제 뉴스 검색 결과 수집 (국내 + 해외, 실패해도 빈 리스트 반환)"""
     research = []
     for kw in keywords[:3]:
         for item in _search_naver_news(kw, limit=per_keyword):
-            research.append({"keyword": kw, **item})
+            research.append({"keyword": kw, "origin": "domestic", **item})
+        for item in _search_foreign_news(kw, limit=2):
+            research.append({"keyword": kw, "origin": "foreign", **item})
     return research
 
 
@@ -72,13 +103,22 @@ def _format_research_block(research: list[dict]) -> str:
     if not research:
         return ""
 
+    domestic = [r for r in research if r.get("origin") != "foreign"]
+    foreign = [r for r in research if r.get("origin") == "foreign"]
+
     lines = [f"- [{r['keyword']}] {r['title']}" + (f" — {r['summary']}" if r.get("summary") else "")
-             for r in research]
+             for r in domestic]
+    if foreign:
+        lines.append("\n[해외 매체 보도 — 원문은 영어, 반드시 한국어로 번역·의역해서 인용할 것]")
+        lines += [f"- [{r['keyword']}] ({r.get('source_name') or '해외 매체'}) {r['title']}" for r in foreign]
+
     return (
         "\n\n# 실제 검색 결과 (반드시 아래 사실에 기반해서 작성하세요. 지어내지 마세요)\n"
         + "\n".join(lines)
         + "\n\n위 검색 결과와 모순되는 내용, 확인되지 않은 추측을 사실처럼 서술하지 마세요. "
-        "검색 결과가 부족한 부분은 일반적이고 안전한 서술로 채우세요."
+        "검색 결과가 부족한 부분은 일반적이고 안전한 서술로 채우세요. "
+        "해외 매체 내용을 인용할 때는 영어 원문을 그대로 쓰지 말고 반드시 한국어로 번역해서 "
+        "자연스럽게 녹여 쓰세요."
     )
 
 
@@ -269,6 +309,11 @@ def generate_blog_post(title: str, keywords: list[str], tone: str = "정보전�
 
 8. **태그**: 핵심 키워드 + 연관 검색어 포함, 5~8개 생성
 9. **카테고리**: 아래 목록 중 이 글에 가장 맞는 것 정확히 하나만 선택 — {category_list}
+10. **해외 자료 인용으로 풍성하게**: 아래 실제 검색 결과 중 해외 매체 보도가 있으면 최소 1곳 이상
+    인용하세요. "OOO(해외 매체명)에 따르면", "외신 OOO 보도에 따르면" 처럼 출처를 밝히고, 영어
+    원문을 그대로 쓰지 말고 반드시 자연스러운 한국어로 번역·의역해서 인용하세요. 해당 보도에
+    사진·현장 묘사가 언급됐다면 그 장면도 글 속에 구체적으로 녹여서 묘사해 내용을 풍성하게
+    만드세요 (실제 이미지 파일을 가져오라는 뜻이 아니라, 묘사로 생생함을 더하라는 뜻입니다).
 
 # Output Format
 - [도입부]: 공감 유발 일화나 질문으로 시작 (<p> 태그, 2~3문단, 구어체) → {{IMAGE_1}} 삽입
