@@ -20,6 +20,9 @@ _SEARCH_HEADERS = {
 # 마지막으로 사용된 LLM 추적 (사이드바 표시용)
 _last_provider: dict = {"name": None, "model": None}
 
+# Blogger 라벨이 매 글마다 자유형 태그로 흩어지는 것을 막기 위한 고정 카테고리 목록
+CATEGORIES = ["이슈/뉴스", "건강정보", "라이프", "테크/IT", "엔터테인먼트"]
+
 
 # ── 실제 검색 결과 조사 (키워드 기반 지어내기 방지) ──────────────────────────
 
@@ -233,6 +236,7 @@ def suggest_topics(keywords: list[str], count: int = 5) -> list[dict]:
 
 def generate_blog_post(title: str, keywords: list[str], tone: str = "정보전달") -> dict:
     kw_str = ", ".join(keywords)
+    category_list = ", ".join(CATEGORIES)
     research_block = _format_research_block(research_keywords([title] + keywords))
     prompt = f"""# Role
 당신은 10년 이상 블로그를 운영해온 실제 한국인 블로거입니다. 구글 SEO, 애드센스 정책, 그리고 구글의 AI 콘텐츠 감지 시스템을 누구보다 잘 알고 있습니다.
@@ -263,7 +267,8 @@ def generate_blog_post(title: str, keywords: list[str], tone: str = "정보전�
 
 7. **감정·의견 적극 표현**: "개인적으로 이게 제일 중요하다고 생각해요", "솔직히 이건 좀 아쉬운 부분이에요"
 
-8. **태그**: 핵심 키워드 + 연관 검색어 + 주제 카테고리 포함, 8~10개 생성
+8. **태그**: 핵심 키워드 + 연관 검색어 포함, 5~8개 생성
+9. **카테고리**: 아래 목록 중 이 글에 가장 맞는 것 정확히 하나만 선택 — {category_list}
 
 # Output Format
 - [도입부]: 공감 유발 일화나 질문으로 시작 (<p> 태그, 2~3문단, 구어체) → {{IMAGE_1}} 삽입
@@ -288,7 +293,8 @@ def generate_blog_post(title: str, keywords: list[str], tone: str = "정보전�
   "title": "클릭을 유도하는 제목 (핵심 키워드 포함, 숫자나 의문형 활용)",
   "content_html": "HTML 본문 전체",
   "meta_description": "검색 결과 설명 (150자 이내, 핵심 키워드 포함, 구어체)",
-  "tags": ["태그1", "태그2", "태그3", "태그4", "태그5", "태그6", "태그7", "태그8"],
+  "category": "위 카테고리 목록 중 정확히 하나",
+  "tags": ["태그1", "태그2", "태그3", "태그4", "태그5"],
   "image_prompts": [
     "IMAGE_1 이미지 설명 (영어, 50자 이내)",
     "IMAGE_2 이미지 설명 (영어, 50자 이내)",
@@ -307,13 +313,19 @@ def generate_blog_post(title: str, keywords: list[str], tone: str = "정보전�
             ]
         result["content_html"] = _ensure_image_placeholders(result.get("content_html", ""))
         result["content_html"] = _apply_readability_styles(result["content_html"])
+        category = result.get("category", "")
+        if category not in CATEGORIES:
+            category = CATEGORIES[0]
+        result["category"] = category
+        result["tags"] = [category] + [t for t in result.get("tags", []) if t != category]
         return result
 
     return {
         "title":            title,
         "content_html":     f"<p>{text}</p>",
         "meta_description": "",
-        "tags":             keywords[:5],
+        "category":         CATEGORIES[0],
+        "tags":             [CATEGORIES[0]] + keywords[:5],
         "image_prompts":    ["blog post illustration", "relevant image", "article image"],
     }
 

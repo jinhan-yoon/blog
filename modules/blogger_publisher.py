@@ -179,7 +179,7 @@ def publish_post(
         "content": content_html,
     }
     if tags:
-        body["labels"] = tags
+        body["labels"] = tags[:5]
 
     result = service.posts().insert(
         blogId=blog_id,
