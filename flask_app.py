@@ -74,6 +74,7 @@ DEFAULT_WORKSPACE = {
     "oauth_redirect_uri": None,
     "oauth_code_verifier": None,
     "naver_login_state": None,
+    "local_save_path": None,
 }
 
 
@@ -160,6 +161,27 @@ def _saved_posts() -> list[dict]:
             continue
         posts.append({"name": path.name, "path": path, "data": data})
     return posts
+
+
+def _save_local(ws: dict, title: str, content_html: str, tags: list, meta_description: str) -> Path:
+    """작성 중인 글을 로컬에 저장. ws에 기록된 파일이 있으면 그 파일을 계속 덮어써서
+    같은 글을 여러 번 자동저장해도 파일이 계속 새로 생기지 않게 한다."""
+    DATA_DIR.mkdir(exist_ok=True)
+    existing = ws.get("local_save_path")
+    path = DATA_DIR / existing if existing else None
+    if not path or path.parent.resolve() != DATA_DIR.resolve() or not path.exists():
+        safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:40].strip() or "post"
+        path = DATA_DIR / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_title}.json"
+        ws["local_save_path"] = path.name
+    payload = {
+        "title": title,
+        "content_html": content_html,
+        "tags": tags,
+        "meta_description": meta_description,
+        "saved_at": datetime.now().isoformat(),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
 
 
 def _save_env(form) -> None:
@@ -300,9 +322,11 @@ def content():
                 ws["post_topic"] = topic
                 ws["post_title"] = topic.get("title", "")
                 ws["topics"] = None
+                ws["local_save_path"] = None
             elif action == "custom_title":
                 ws["post_title"] = request.form.get("post_title", "").strip()
                 ws["topics"] = None
+                ws["local_save_path"] = None
             elif action == "generate_post":
                 from modules.content_generator import generate_blog_post
                 keywords = _tags_from_text(request.form.get("keywords", "")) or ws["selected_keywords"]
@@ -313,19 +337,22 @@ def content():
                 ws["post_tags"] = result.get("tags", [])
                 ws["image_prompts"] = result.get("image_prompts", [])
                 ws["final_html"] = ""
-                flash("본문이 생성되었습니다.", "success")
+                _save_local(ws, ws["post_title"], ws["post_content_html"], ws["post_tags"], ws["post_meta_desc"])
+                flash("본문이 생성되었습니다. (자동 저장됨)", "success")
             elif action == "save_edits":
                 ws["post_title"] = request.form.get("title", ws["post_title"])
                 ws["post_content_html"] = request.form.get("content_html", "")
                 ws["post_tags"] = _tags_from_text(request.form.get("tags", ""))
                 ws["post_meta_desc"] = request.form.get("meta_description", "")
                 ws["final_html"] = ""
-                flash("수정 내용을 반영했습니다.", "success")
+                _save_local(ws, ws["post_title"], ws["post_content_html"], ws["post_tags"], ws["post_meta_desc"])
+                flash("수정 내용을 반영했습니다. (자동 저장됨)", "success")
             elif action == "refine":
                 from modules.content_generator import refine_content
                 ws["post_content_html"] = refine_content(request.form.get("content_html", ""), request.form.get("instruction", ""))
                 ws["final_html"] = ""
-                flash("AI 수정이 적용되었습니다.", "success")
+                _save_local(ws, ws["post_title"], ws["post_content_html"], ws["post_tags"], ws["post_meta_desc"])
+                flash("AI 수정이 적용되었습니다. (자동 저장됨)", "success")
         except Exception as exc:
             flash(f"오류: {exc}", "error")
         return redirect(url_for("content"))
@@ -354,7 +381,8 @@ def media():
                     {k: v for k, v in r.items() if k != "bytes"} | {"has_bytes": bool(r.get("bytes"))}
                     for r in results
                 ]
-                flash("이미지 생성 및 삽입이 완료되었습니다.", "success")
+                _save_local(ws, ws["post_title"], ws["final_html"], ws["post_tags"], ws["post_meta_desc"])
+                flash("이미지 생성 및 삽입이 완료되었습니다. (자동 저장됨)", "success")
             except Exception as exc:
                 flash(f"이미지 생성 실패: {exc}", "error")
         return redirect(url_for("media"))
@@ -391,17 +419,7 @@ def publish():
         title = request.form.get("title", ws.get("post_title", ""))
         try:
             if action == "save_local":
-                DATA_DIR.mkdir(exist_ok=True)
-                safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:40].strip() or "post"
-                path = DATA_DIR / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_title}.json"
-                payload = {
-                    "title": title,
-                    "content_html": final_html,
-                    "tags": ws.get("post_tags", []),
-                    "meta_description": ws.get("post_meta_desc", ""),
-                    "saved_at": datetime.now().isoformat(),
-                }
-                path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                path = _save_local(ws, title, final_html, ws.get("post_tags", []), ws.get("post_meta_desc", ""))
                 flash(f"로컬 저장 완료: {path.name}", "success")
             elif action in ("blogger_draft", "blogger_publish", "publish_both"):
                 from modules.blogger_publisher import publish_post
