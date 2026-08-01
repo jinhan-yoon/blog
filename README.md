@@ -74,6 +74,7 @@ HUGGINGFACE_TOKEN=hf_...           # HuggingFace SD XL용 (선택)
 
 # Google Blogger
 BLOGGER_BLOG_ID=1234567890123456789
+BLOGGER_BLOG_URL=https://superipnet.blogspot.com   # 네이버 글 상하단에 넣을 방문 링크
 
 # 네이버 블로그 (Playwright UI 자동화, 공식 API 없음)
 NAVER_ID=your_naver_id

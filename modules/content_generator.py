@@ -454,3 +454,29 @@ def refine_content(content_html: str, instruction: str) -> str:
 원본 본문:
 {content_html}"""
     return _generate(prompt)
+
+
+def rewrite_for_naver(content_html: str, title: str) -> str:
+    """Blogger에 이미 올라간 글과 검색엔진에 중복 콘텐츠로 안 잡히도록,
+    같은 정보를 다른 문장·구성으로 다시 쓴 네이버용 버전을 생성.
+    {IMAGE_N} 플레이스홀더는 원본과 동일한 개수·순서로 유지해야 한다."""
+    prompt = f"""아래는 이미 다른 블로그(Blogger)에 발행한 글입니다. 같은 주제로 네이버
+블로그에도 올릴 건데, 두 사이트에 완전히 똑같은 글이 올라가면 검색엔진에
+중복 콘텐츠로 인식돼 둘 다 손해예요. 그래서 같은 정보·사실은 유지하되
+문장 구성과 표현을 확실히 다르게 다시 써주세요.
+
+- 문단 순서, 예시, 비유, 도입부/결론 문구를 원본과 다르게 재구성하세요.
+- 사실관계(숫자, 이름, 날짜 등)는 원본과 동일하게 유지하세요.
+- {{IMAGE_1}}, {{IMAGE_2}}, {{IMAGE_3}} 플레이스홀더는 원본에 있는 개수와
+  순서 그대로 결과물에도 반드시 포함하세요 (문구 자체는 그대로 유지).
+- HTML 태그 구조(H2/H3, <strong> 등)는 유지해도 되지만 문장 자체는 원본을
+  그대로 베끼지 말고 새로 쓰세요.
+
+수정된 HTML 본문만 반환하세요 (JSON 없이, 마크다운 없이, 설명 문구 없이).
+
+제목: {title}
+
+원본 본문:
+{content_html}"""
+    rewritten = _generate(prompt)
+    return _ensure_image_placeholders(rewritten)

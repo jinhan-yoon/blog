@@ -204,6 +204,7 @@ CLAUDE_MODEL={form.get('claude_model', 'claude-sonnet-4-6')}
 
 # -- Google Blogger ---------------------------------------------
 BLOGGER_BLOG_ID={form.get('blogger_blog_id', '')}
+BLOGGER_BLOG_URL={form.get('blogger_blog_url', '')}
 
 # -- Naver Blog --------------------------------------------------
 NAVER_ID={form.get('naver_id', '')}
@@ -441,18 +442,56 @@ def media():
     return render_page("media", MEDIA_TEMPLATE, ws=ws)
 
 
-def _start_naver_publish(ws, title, final_html):
+def _build_naver_content(ws, title) -> str:
+    """Blogger용 원문을 그대로 쓰지 않고, 중복 콘텐츠를 피하기 위해 다시 쓴 뒤
+    같은 이미지를 재삽입하고 상하단에 Blogger 방문 링크를 넣은 네이버용 본문을 만든다."""
+    base_html = ws.get("post_content_html") or ws.get("final_html") or ""
+    if not base_html:
+        return ws.get("final_html") or ""
+
+    try:
+        from modules.content_generator import rewrite_for_naver
+        from modules.image_generator import insert_images_into_html
+        rewritten = rewrite_for_naver(base_html, title)
+        content_html = insert_images_into_html(rewritten, ws.get("image_data") or [])
+    except Exception:
+        content_html = ws.get("final_html") or base_html
+
+    blog_url = os.getenv("BLOGGER_BLOG_URL", "").strip()
+    if blog_url:
+        link_html = f'<p>🔗 더 자세한 내용과 다른 글은 여기서도 볼 수 있어요: {blog_url}</p>'
+        content_html = link_html + content_html + link_html
+    return content_html
+
+
+def _build_blogger_content(final_html: str) -> str:
+    """네이버 블로그 방문 링크를 상하단에 넣은 Blogger용 본문을 만든다 (교차 유입용)."""
+    naver_blog_id = os.getenv("NAVER_BLOG_ID", "").strip()
+    if not naver_blog_id:
+        return final_html
+    naver_url = f"https://blog.naver.com/{naver_blog_id}"
+    link_html = (
+        f'<p>🔗 네이버 블로그에서도 이 글을 볼 수 있어요: '
+        f'<a href="{naver_url}" target="_blank" rel="noopener">{naver_url}</a></p>'
+    )
+    return link_html + final_html + link_html
+
+
+def _start_naver_publish(ws, title):
     from modules.naver_blog_poster import publish_post as naver_publish_post
     ws["naver_publish_log"] = []
     ws["naver_publish_result"] = None
     ws["naver_publish_running"] = True
     tags = ws.get("post_tags", [])
 
-    def _run(ws=ws, title=title, final_html=final_html, tags=tags):
+    def _run(ws=ws, title=title, tags=tags):
         def _on_log(msg):
             ws["naver_publish_log"].append(msg)
         try:
-            ws["naver_publish_result"] = naver_publish_post(title, final_html, tags, log_callback=_on_log)
+            _on_log("네이버용으로 다시 쓰는 중 (Blogger 원문과 중복 방지)...")
+            content_html = _build_naver_content(ws, title)
+            _on_log("네이버 발행 시작...")
+            ws["naver_publish_result"] = naver_publish_post(title, content_html, tags, log_callback=_on_log)
         except Exception as exc:
             ws["naver_publish_result"] = {"url": None, "error": str(exc), "screenshot": None}
         finally:
@@ -475,7 +514,7 @@ def publish():
                 flash(f"로컬 저장 완료: {path.name}", "success")
             elif action in ("blogger_draft", "blogger_publish", "publish_both"):
                 from modules.blogger_publisher import publish_post
-                result = publish_post(title, final_html, ws.get("post_tags", []), is_draft=(action == "blogger_draft"))
+                result = publish_post(title, _build_blogger_content(final_html), ws.get("post_tags", []), is_draft=(action == "blogger_draft"))
                 ws["publish_result"] = result
                 if not result.get("error"):
                     ws["publish_history"].append(result)
@@ -483,7 +522,7 @@ def publish():
                     if ws.get("naver_publish_running"):
                         flash("Blogger는 처리했지만, 네이버가 이미 진행 중이라 건너뛰었습니다.", "error")
                     else:
-                        _start_naver_publish(ws, title, final_html)
+                        _start_naver_publish(ws, title)
                         flash("Blogger 발행 완료, 네이버 발행을 시작했습니다.", "success")
                 else:
                     flash("Blogger 작업이 완료되었습니다.", "success")
@@ -870,7 +909,7 @@ SAVED_TEMPLATE = """
 """
 
 SETTINGS_TEMPLATE = """
-<div class="header">⚙️ 설정</div><form method="post"><input type="hidden" name="action" value="save_env"><div class="grid2"><div class="panel"><h3>LLM / 이미지</h3><label>LLM 서버 주소</label><input name="llm_addr" value="{{ os.getenv('LLM_ADDR','') }}"><label>LLM 모델명</label><input name="llm_model" value="{{ os.getenv('LLM_MODEL','') }}"><label>LLM API Key</label><input name="llm_api_key" value="{{ os.getenv('LLM_API_KEY','EMPTY') }}"><label>Claude 모델</label><input name="claude_model" value="{{ os.getenv('CLAUDE_MODEL','claude-sonnet-4-6') }}"><label>이미지 생성 방식</label><select name="image_provider"><option value="pollinations">pollinations</option><option value="huggingface">huggingface</option><option value="claude">claude</option><option value="dalle">dalle</option></select><label>Anthropic API Key</label><input name="anthropic_key" value="{{ os.getenv('ANTHROPIC_API_KEY','') }}"><label>OpenAI API Key</label><input name="openai_key" value="{{ os.getenv('OPENAI_API_KEY','') }}"><label>HuggingFace Token</label><input name="hf_token" value="{{ os.getenv('HUGGINGFACE_TOKEN','') }}"></div><div class="panel"><h3>블로그 / 로그인</h3><label>Blogger Blog ID</label><input name="blogger_blog_id" value="{{ os.getenv('BLOGGER_BLOG_ID','') }}"><label>네이버 아이디</label><input name="naver_id" value="{{ os.getenv('NAVER_ID','') }}"><label>네이버 비밀번호</label><input name="naver_pw" value="{{ os.getenv('NAVER_PW','') }}"><label>네이버 블로그 ID</label><input name="naver_blog_id" value="{{ os.getenv('NAVER_BLOG_ID','') }}"><label>앱 접속 주소</label><input name="app_base_url" value="{{ os.getenv('APP_BASE_URL','https://blog.superip.net') }}"><label>허용 구글 이메일</label><input name="allowed_email" value="{{ os.getenv('ALLOWED_GOOGLE_EMAIL','') }}"><label>앱 비밀번호</label><input name="app_password" value="{{ os.getenv('APP_PASSWORD','') }}"><button class="primary">설정 저장</button></div></div></form><div class="grid2"><div class="panel"><h3>Google Blogger OAuth</h3><form method="post" enctype="multipart/form-data"><input type="hidden" name="action" value="upload_client_secret"><label>client_secret.json 업로드</label><input type="file" name="client_secret" accept=".json"><button>업로드</button></form><form method="post"><input type="hidden" name="action" value="oauth_reset"><button>토큰 재발급</button></form><form method="post"><input type="hidden" name="action" value="oauth_start"><label>리디렉션 URI</label><input name="redirect_uri" value="http://localhost"><button class="primary">인증 URL 생성</button></form>{% if ws.oauth_url %}<p class="notice">아래 URL을 열어 승인한 뒤, 리다이렉트 URL 또는 code 값을 붙여넣으세요.</p><pre>{{ ws.oauth_url }}</pre><form method="post"><input type="hidden" name="action" value="oauth_complete"><label>리다이렉트 URL 또는 code</label><input name="oauth_code"><button class="primary">인증 완료</button></form>{% endif %}<form method="post"><input type="hidden" name="action" value="blog_test"><input type="hidden" name="blogger_blog_id" value="{{ os.getenv('BLOGGER_BLOG_ID','') }}"><button>블로그 연결 테스트</button></form></div><div class="panel"><h3>앱 로그인 / 네이버 로그인</h3><form method="post" enctype="multipart/form-data"><input type="hidden" name="action" value="upload_login_secret"><label>login_client_secret.json 업로드</label><input type="file" name="login_client_secret" accept=".json"><button>업로드</button></form><hr><form method="post"><button class="primary" name="action" value="naver_login_start">네이버 로그인 시작</button></form>{% if ws.naver_login_state %}{% set ns = ws.naver_login_state %}{% if ns.status == 'success' %}<p class="notice success">네이버 로그인 성공. 세션이 저장되었습니다.</p>{% elif ns.status == 'challenge' %}<p class="notice warn">추가 인증이 필요합니다.</p><img src="data:image/png;base64,{{ ns.screenshot_b64 }}" style="max-width:100%;border:1px solid #ddd"><form method="post"><input type="hidden" name="action" value="naver_login_submit"><input type="hidden" name="session_id" value="{{ ns.session_id }}"><label>정답 입력</label><input name="answer"><button class="primary">제출</button></form><form method="post"><button name="action" value="naver_login_cancel">취소</button></form>{% elif ns.status == 'error' %}<p class="notice error">{{ ns.message }}</p>{% if ns.screenshot_b64 %}<img src="data:image/png;base64,{{ ns.screenshot_b64 }}" style="max-width:100%;border:1px solid #ddd">{% endif %}{% endif %}{% endif %}</div></div>
+<div class="header">⚙️ 설정</div><form method="post"><input type="hidden" name="action" value="save_env"><div class="grid2"><div class="panel"><h3>LLM / 이미지</h3><label>LLM 서버 주소</label><input name="llm_addr" value="{{ os.getenv('LLM_ADDR','') }}"><label>LLM 모델명</label><input name="llm_model" value="{{ os.getenv('LLM_MODEL','') }}"><label>LLM API Key</label><input name="llm_api_key" value="{{ os.getenv('LLM_API_KEY','EMPTY') }}"><label>Claude 모델</label><input name="claude_model" value="{{ os.getenv('CLAUDE_MODEL','claude-sonnet-4-6') }}"><label>이미지 생성 방식</label><select name="image_provider"><option value="pollinations">pollinations</option><option value="huggingface">huggingface</option><option value="claude">claude</option><option value="dalle">dalle</option></select><label>Anthropic API Key</label><input name="anthropic_key" value="{{ os.getenv('ANTHROPIC_API_KEY','') }}"><label>OpenAI API Key</label><input name="openai_key" value="{{ os.getenv('OPENAI_API_KEY','') }}"><label>HuggingFace Token</label><input name="hf_token" value="{{ os.getenv('HUGGINGFACE_TOKEN','') }}"></div><div class="panel"><h3>블로그 / 로그인</h3><label>Blogger Blog ID</label><input name="blogger_blog_id" value="{{ os.getenv('BLOGGER_BLOG_ID','') }}"><label>Blogger 블로그 주소 (네이버 글 상하단 링크용)</label><input name="blogger_blog_url" value="{{ os.getenv('BLOGGER_BLOG_URL','') }}"><label>네이버 아이디</label><input name="naver_id" value="{{ os.getenv('NAVER_ID','') }}"><label>네이버 비밀번호</label><input name="naver_pw" value="{{ os.getenv('NAVER_PW','') }}"><label>네이버 블로그 ID</label><input name="naver_blog_id" value="{{ os.getenv('NAVER_BLOG_ID','') }}"><label>앱 접속 주소</label><input name="app_base_url" value="{{ os.getenv('APP_BASE_URL','https://blog.superip.net') }}"><label>허용 구글 이메일</label><input name="allowed_email" value="{{ os.getenv('ALLOWED_GOOGLE_EMAIL','') }}"><label>앱 비밀번호</label><input name="app_password" value="{{ os.getenv('APP_PASSWORD','') }}"><button class="primary">설정 저장</button></div></div></form><div class="grid2"><div class="panel"><h3>Google Blogger OAuth</h3><form method="post" enctype="multipart/form-data"><input type="hidden" name="action" value="upload_client_secret"><label>client_secret.json 업로드</label><input type="file" name="client_secret" accept=".json"><button>업로드</button></form><form method="post"><input type="hidden" name="action" value="oauth_reset"><button>토큰 재발급</button></form><form method="post"><input type="hidden" name="action" value="oauth_start"><label>리디렉션 URI</label><input name="redirect_uri" value="http://localhost"><button class="primary">인증 URL 생성</button></form>{% if ws.oauth_url %}<p class="notice">아래 URL을 열어 승인한 뒤, 리다이렉트 URL 또는 code 값을 붙여넣으세요.</p><pre>{{ ws.oauth_url }}</pre><form method="post"><input type="hidden" name="action" value="oauth_complete"><label>리다이렉트 URL 또는 code</label><input name="oauth_code"><button class="primary">인증 완료</button></form>{% endif %}<form method="post"><input type="hidden" name="action" value="blog_test"><input type="hidden" name="blogger_blog_id" value="{{ os.getenv('BLOGGER_BLOG_ID','') }}"><button>블로그 연결 테스트</button></form></div><div class="panel"><h3>앱 로그인 / 네이버 로그인</h3><form method="post" enctype="multipart/form-data"><input type="hidden" name="action" value="upload_login_secret"><label>login_client_secret.json 업로드</label><input type="file" name="login_client_secret" accept=".json"><button>업로드</button></form><hr><form method="post"><button class="primary" name="action" value="naver_login_start">네이버 로그인 시작</button></form>{% if ws.naver_login_state %}{% set ns = ws.naver_login_state %}{% if ns.status == 'success' %}<p class="notice success">네이버 로그인 성공. 세션이 저장되었습니다.</p>{% elif ns.status == 'challenge' %}<p class="notice warn">추가 인증이 필요합니다.</p><img src="data:image/png;base64,{{ ns.screenshot_b64 }}" style="max-width:100%;border:1px solid #ddd"><form method="post"><input type="hidden" name="action" value="naver_login_submit"><input type="hidden" name="session_id" value="{{ ns.session_id }}"><label>정답 입력</label><input name="answer"><button class="primary">제출</button></form><form method="post"><button name="action" value="naver_login_cancel">취소</button></form>{% elif ns.status == 'error' %}<p class="notice error">{{ ns.message }}</p>{% if ns.screenshot_b64 %}<img src="data:image/png;base64,{{ ns.screenshot_b64 }}" style="max-width:100%;border:1px solid #ddd">{% endif %}{% endif %}{% endif %}</div></div>
 """
 
 LOGS_TEMPLATE = """
