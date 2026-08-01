@@ -470,20 +470,27 @@ def _build_naver_content(ws, title) -> str:
 
     blog_url = os.getenv("BLOGGER_BLOG_URL", "").strip()
     if blog_url:
-        link_html = f'<p>🔗 더 자세한 내용과 다른 글은 여기서도 볼 수 있어요: {blog_url}</p>'
+        # 네이버 발행 자동화는 태그별로 텍스트만 추출해 한 줄씩 입력하므로, URL을
+        # 별도 <p>로 분리해야 네이버 에디터의 자동 링크 인식을 기대할 수 있다.
+        link_html = f'<p>📌 이 글은 구글 블로그에도 같이 올려뒀어요.</p><p>{blog_url}</p>'
         content_html = link_html + content_html + link_html
     return content_html
 
 
 def _build_blogger_content(final_html: str) -> str:
-    """네이버 블로그 방문 링크를 상하단에 넣은 Blogger용 본문을 만든다 (교차 유입용)."""
+    """네이버 블로그 방문 링크를 상하단에 카드 형태로 넣은 Blogger용 본문을 만든다 (교차 유입용)."""
     naver_blog_id = os.getenv("NAVER_BLOG_ID", "").strip()
     if not naver_blog_id:
         return final_html
     naver_url = f"https://blog.naver.com/{naver_blog_id}"
     link_html = (
-        f'<p>🔗 네이버 블로그에서도 이 글을 볼 수 있어요: '
-        f'<a href="{naver_url}" target="_blank" rel="noopener">{naver_url}</a></p>'
+        '<div style="margin:22px 0;padding:14px 18px;background:#f3f6fb;'
+        'border-left:4px solid #03c75a;border-radius:8px;">'
+        '<p style="margin:0;font-size:0.95em;color:#333;">'
+        '📌 이 글은 네이버 블로그에도 올라와 있어요 · '
+        f'<a href="{naver_url}" target="_blank" rel="noopener" '
+        'style="color:#03c75a;font-weight:600;text-decoration:none;">네이버에서 보기</a>'
+        '</p></div>'
     )
     return link_html + final_html + link_html
 
