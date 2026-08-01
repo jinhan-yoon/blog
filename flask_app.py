@@ -748,7 +748,8 @@ def render_login(error: str = ""):
 
 def render_page(active: str, body_template: str, **ctx):
     body = render_template_string(body_template, active=active, **ctx)
-    return render_template_string(BASE_TEMPLATE, css=BASE_CSS, active=active, body=body, user=_current_user(), status=_status())
+    ws = ctx.get("ws") or _workspace()
+    return render_template_string(BASE_TEMPLATE, css=BASE_CSS, active=active, body=body, user=_current_user(), status=_status(), ws=ws)
 
 
 BASE_CSS = """
@@ -772,6 +773,7 @@ aside .caption { color:#9ca3af; font-size:12px; margin-bottom:18px; }
 main { padding:26px 32px 48px; max-width:1320px; width:100%; }
 .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; gap:10px; }
 .topbar form { margin:0; }
+.bg-status { display:inline-flex; align-items:center; gap:6px; background:#fffbeb; color:#92400e; border:1px solid #fde68a; border-radius:999px; padding:6px 12px; font-size:12.5px; font-weight:700; text-decoration:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:22px; margin:0 0 18px; }
 .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
 .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
@@ -823,6 +825,13 @@ summary { cursor:pointer; font-weight:800; }
   }
   main { padding:16px 16px 32px; }
   .grid2, .grid3, .grid4, .checkbox-list { grid-template-columns:1fr; }
+  /* 상단 바(햄버거+로그아웃) 고정: main의 padding을 상쇄하고 화면 끝까지 붙인 뒤 sticky */
+  .topbar {
+    position:sticky; top:0; z-index:500;
+    background:var(--bg); margin:-16px -16px 16px; padding:12px 16px;
+    border-bottom:1px solid var(--line);
+  }
+  .bg-status { max-width:150px; }
   /* 햄버거 버튼: topbar 안의 일반 flex 아이템으로 배치 (더 이상 position:fixed 아님) */
   .topbar .nav-toggle-label {
     display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto;
@@ -885,7 +894,7 @@ BASE_TEMPLATE = """
 <a class="nav-link {{ 'active' if active=='logs' else '' }}" href="{{ url_for('logs') }}">🪵 오류 로그</a>
 <a class="nav-link {{ 'active' if active=='manual' else '' }}" href="{{ url_for('manual') }}">📚 매뉴얼</a>
 <div class="status"><b>API 상태</b><br>{{ '✅' if status.llm.vllm_available else '❌' }} vLLM · {{ '✅' if status.llm.claude_available else '⚪' }} Claude<br>{{ '✅' if status.blogger.ready else '❌' }} Blogger · {{ '✅' if status.naver.ready else '❌' }} 네이버<br>🖼️ {{ status.image_provider }}</div>
-</aside><main><div class="topbar"><label for="nav-toggle" class="nav-toggle-label" aria-label="메뉴 열기">☰</label><div class="inline" style="margin-left:auto"><div class="muted">{{ user }} 로그인됨</div><form method="post" action="{{ url_for('logout') }}"><button class="small" type="submit">로그아웃</button></form></div></div>
+</aside><main><div class="topbar"><label for="nav-toggle" class="nav-toggle-label" aria-label="메뉴 열기">☰</label>{% if ws.quick_generate_running or ws.naver_publish_running %}<a href="{{ url_for('publish') }}" class="bg-status">{% if ws.quick_generate_running %}⚡ 본문+이미지 작성 중…{% endif %}{% if ws.quick_generate_running and ws.naver_publish_running %} · {% endif %}{% if ws.naver_publish_running %}🟢 네이버 발행 중…{% endif %}</a>{% endif %}<div class="inline" style="margin-left:auto"><div class="muted">{{ user }} 로그인됨</div><form method="post" action="{{ url_for('logout') }}"><button class="small" type="submit">로그아웃</button></form></div></div>
 {% with messages = get_flashed_messages(with_categories=true) %}{% for cat,msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}{% endwith %}
 {{ body|safe }}</main></div></body></html>
 """
