@@ -64,6 +64,7 @@ DEFAULT_WORKSPACE = {
     "image_prompts": [],
     "image_data": [],
     "final_html": "",
+    "naver_content_html": "",
     "publish_result": None,
     "naver_publish_result": None,
     "naver_publish_running": False,
@@ -317,6 +318,7 @@ def _run_quick_generate(ws, title, keywords, tone):
         ws["post_tags"] = result.get("tags", [])
         ws["image_prompts"] = result.get("image_prompts", [])
         ws["final_html"] = ""
+        ws["naver_content_html"] = ""
         _save_local(ws, ws["post_title"], ws["post_content_html"], ws["post_tags"], ws["post_meta_desc"])
         _log("본문 생성 완료. 이미지 생성 시작...")
 
@@ -328,7 +330,9 @@ def _run_quick_generate(ws, title, keywords, tone):
             for r in results
         ]
         _save_local(ws, ws["post_title"], ws["final_html"], ws["post_tags"], ws["post_meta_desc"])
-        _log("완료! 아래에서 바로 확인하고 발행할 수 있습니다.")
+        _log("네이버용 버전도 다르게 준비하는 중 (중복 콘텐츠 방지)...")
+        ws["naver_content_html"] = _build_naver_content(ws, ws["post_title"])
+        _log("완료! 아래에서 구글용/네이버용 각각 바로 발행할 수 있습니다.")
     except Exception as exc:
         ws["quick_generate_error"] = str(exc)
         _log(f"오류: {exc}")
@@ -363,10 +367,12 @@ def content():
                 ws["post_title"] = topic.get("title", "")
                 ws["topics"] = None
                 ws["local_save_path"] = None
+                ws["naver_content_html"] = ""
             elif action == "custom_title":
                 ws["post_title"] = request.form.get("post_title", "").strip()
                 ws["topics"] = None
                 ws["local_save_path"] = None
+                ws["naver_content_html"] = ""
             elif action == "generate_post":
                 from modules.content_generator import generate_blog_post
                 keywords = _tags_from_text(request.form.get("keywords", "")) or ws["selected_keywords"]
@@ -377,6 +383,7 @@ def content():
                 ws["post_tags"] = result.get("tags", [])
                 ws["image_prompts"] = result.get("image_prompts", [])
                 ws["final_html"] = ""
+                ws["naver_content_html"] = ""
                 _save_local(ws, ws["post_title"], ws["post_content_html"], ws["post_tags"], ws["post_meta_desc"])
                 flash("본문이 생성되었습니다. (자동 저장됨)", "success")
             elif action == "quick_generate":
@@ -398,12 +405,14 @@ def content():
                 ws["post_tags"] = _tags_from_text(request.form.get("tags", ""))
                 ws["post_meta_desc"] = request.form.get("meta_description", "")
                 ws["final_html"] = ""
+                ws["naver_content_html"] = ""
                 _save_local(ws, ws["post_title"], ws["post_content_html"], ws["post_tags"], ws["post_meta_desc"])
                 flash("수정 내용을 반영했습니다. (자동 저장됨)", "success")
             elif action == "refine":
                 from modules.content_generator import refine_content
                 ws["post_content_html"] = refine_content(request.form.get("content_html", ""), request.form.get("instruction", ""))
                 ws["final_html"] = ""
+                ws["naver_content_html"] = ""
                 _save_local(ws, ws["post_title"], ws["post_content_html"], ws["post_tags"], ws["post_meta_desc"])
                 flash("AI 수정이 적용되었습니다. (자동 저장됨)", "success")
         except Exception as exc:
@@ -420,6 +429,7 @@ def media():
         action = request.form.get("action")
         if action == "skip":
             ws["final_html"] = ws.get("post_content_html", "")
+            ws["naver_content_html"] = ""
             flash("이미지 없이 발행 단계로 넘겼습니다.", "success")
             return redirect(url_for("publish"))
         if action == "generate_images":
@@ -435,7 +445,8 @@ def media():
                     for r in results
                 ]
                 _save_local(ws, ws["post_title"], ws["final_html"], ws["post_tags"], ws["post_meta_desc"])
-                flash("이미지 생성 및 삽입이 완료되었습니다. (자동 저장됨)", "success")
+                ws["naver_content_html"] = _build_naver_content(ws, ws["post_title"])
+                flash("이미지 생성 및 삽입, 네이버용 버전 준비까지 완료되었습니다. (자동 저장됨)", "success")
             except Exception as exc:
                 flash(f"이미지 생성 실패: {exc}", "error")
         return redirect(url_for("media"))
@@ -488,8 +499,12 @@ def _start_naver_publish(ws, title):
         def _on_log(msg):
             ws["naver_publish_log"].append(msg)
         try:
-            _on_log("네이버용으로 다시 쓰는 중 (Blogger 원문과 중복 방지)...")
-            content_html = _build_naver_content(ws, title)
+            content_html = ws.get("naver_content_html")
+            if content_html:
+                _on_log("이미 준비된 네이버용 버전을 사용합니다.")
+            else:
+                _on_log("네이버용으로 다시 쓰는 중 (Blogger 원문과 중복 방지)...")
+                content_html = _build_naver_content(ws, title)
             _on_log("네이버 발행 시작...")
             ws["naver_publish_result"] = naver_publish_post(title, content_html, tags, log_callback=_on_log)
         except Exception as exc:
@@ -545,6 +560,7 @@ def publish():
                 ws["image_prompts"] = []
                 ws["image_data"] = []
                 ws["final_html"] = ""
+                ws["naver_content_html"] = ""
                 ws["publish_result"] = None
                 ws["naver_publish_result"] = None
                 ws["naver_publish_running"] = False
