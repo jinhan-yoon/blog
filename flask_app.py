@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import secrets
 import threading
 from datetime import datetime
@@ -410,12 +411,29 @@ def content():
                 flash("수정 내용을 반영했습니다. (자동 저장됨)", "success")
             elif action == "refine":
                 from modules.content_generator import refine_content
-                ws["post_content_html"] = refine_content(request.form.get("content_html", ""), request.form.get("instruction", ""))
+                instruction = request.form.get("instruction", "").strip()
+                if not instruction:
+                    flash("AI 수정 요청 내용을 입력해주세요.", "error")
+                    return redirect(url_for("content"))
+                if not ws.get("post_content_html"):
+                    flash("수정할 본문이 없습니다. 먼저 본문을 생성해주세요.", "error")
+                    return redirect(url_for("content"))
+                try:
+                    refined = refine_content(ws["post_content_html"], instruction)
+                except Exception:
+                    app.logger.exception("AI 수정 적용 실패 (instruction=%r)", instruction)
+                    flash("AI 수정 적용 중 오류가 발생했습니다. LLM 서버/API 키 상태를 확인해주세요. 기존 본문은 그대로 남아있습니다.", "error")
+                    return redirect(url_for("content"))
+                if not refined or not refined.strip():
+                    flash("AI가 빈 결과를 반환해 수정 내용을 적용하지 않았습니다. 요청 문구를 바꿔 다시 시도해주세요.", "error")
+                    return redirect(url_for("content"))
+                ws["post_content_html"] = refined
                 ws["final_html"] = ""
                 ws["naver_content_html"] = ""
                 _save_local(ws, ws["post_title"], ws["post_content_html"], ws["post_tags"], ws["post_meta_desc"])
                 flash("AI 수정이 적용되었습니다. (자동 저장됨)", "success")
         except Exception as exc:
+            app.logger.exception("content() action=%r 처리 중 오류", action)
             flash(f"오류: {exc}", "error")
         return redirect(url_for("content"))
     return render_page("content", CONTENT_TEMPLATE, ws=ws)
@@ -475,6 +493,45 @@ def _build_naver_content(ws, title) -> str:
         link_html = f'<p>📌 이 글은 구글 블로그에도 같이 올려뒀어요.</p><p>{blog_url}</p>'
         content_html = link_html + content_html + link_html
     return content_html
+
+
+_BLOCK_TAG_RE = re.compile(r"<(/?)([a-zA-Z0-9]+)([^>]*?)(/?)>", re.S)
+_VOID_TAGS = {"img", "br", "hr", "meta", "input"}
+
+
+def _split_content_blocks(html: str) -> list[str]:
+    """HTML을 최상위(depth 0) 태그 단위로 잘라 블록별 복사가 가능하게 만든다."""
+    blocks = []
+    depth = 0
+    start = None
+    for m in _BLOCK_TAG_RE.finditer(html):
+        closing, tag, _attrs, selfclose = m.group(1), m.group(2).lower(), m.group(3), m.group(4)
+        void = bool(selfclose) or tag in _VOID_TAGS
+        if not closing:
+            if depth == 0:
+                start = m.start()
+            if void:
+                if depth == 0:
+                    blocks.append(html[start:m.end()])
+                    start = None
+            else:
+                depth += 1
+        else:
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    blocks.append(html[start:m.end()])
+                    start = None
+    return [b for b in blocks if b.strip()]
+
+
+def _naver_blocks_for_display(naver_content_html: str) -> list[dict]:
+    """네이버 수동 발행용: 블록별로 나누고, 이미지 블록이면 img src를 함께 반환."""
+    blocks = []
+    for block_html in _split_content_blocks(naver_content_html or ""):
+        img_match = re.search(r'<img[^>]*\ssrc="([^"]*)"', block_html)
+        blocks.append({"html": block_html, "img_url": img_match.group(1) if img_match else None})
+    return blocks
 
 
 def _build_blogger_content(final_html: str) -> str:
@@ -585,7 +642,8 @@ def publish():
                 ws["publish_result"] = {"error": str(exc)}
             flash(f"오류: {exc}", "error")
         return redirect(url_for("publish"))
-    return render_page("publish", PUBLISH_TEMPLATE, ws=ws, final_html=final_html)
+    naver_blocks = _naver_blocks_for_display(ws.get("naver_content_html"))
+    return render_page("publish", PUBLISH_TEMPLATE, ws=ws, final_html=final_html, naver_blocks=naver_blocks)
 
 
 @app.route("/saved", methods=["GET", "POST"])
@@ -803,6 +861,10 @@ label { display:block; font-size:13px; font-weight:700; color:#334155; margin:10
 .checkbox { border:1px solid var(--line); background:#fff; border-radius:8px; padding:10px; min-height:54px; }
 .preview { border:1px solid var(--line); border-radius:var(--radius); padding:18px; background:#fff; overflow:auto; }
 .card { border:1px solid var(--line); border-radius:var(--radius); padding:14px; background:#fff; box-shadow:var(--shadow); }
+.nvblock { border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:#fff; margin-bottom:10px; }
+.nvblock-content { overflow:auto; margin-bottom:8px; }
+.nvblock-content img { max-width:100%; height:auto; border-radius:8px; }
+.nvblock-actions { justify-content:flex-end; }
 .muted { color:var(--muted); font-size:13px; }
 hr { border:0; border-top:1px solid var(--line); margin:18px 0; }
 code, pre { background:#f1f5f9; border-radius:6px; padding:2px 5px; }
@@ -918,7 +980,7 @@ TRENDS_TEMPLATE = """
 """
 
 CONTENT_TEMPLATE = """
-<div class="header">✍️ STEP 2 · 콘텐츠 작성</div>{% if not ws.selected_keywords %}<div class="notice warn">먼저 트렌드 수집에서 키워드를 선택해주세요.</div>{% else %}<div class="panel"><h3>2-1 · 주제 선정</h3><p>{% for kw in ws.selected_keywords %}<span class="chip">{{ kw }}</span>{% endfor %}</p><form method="post" class="inline"><input type="hidden" name="action" value="suggest_topics"><label>추천 주제 수 <input type="number" name="topic_count" value="10" min="3" max="15"></label><button class="primary">주제 추천 받기</button></form><form method="post"><input type="hidden" name="action" value="custom_title"><label>직접 제목 입력</label><div class="inline"><input name="post_title" value="{{ ws.post_title }}"><button>이 제목 사용</button></div></form></div>{% if ws.topics %}<div class="panel"><h3>추천 주제 목록</h3>{% for topic in ws.topics %}<div class="card"><h4>{{ loop.index }}. {{ topic.title }}</h4><p class="muted">{{ topic.topic }} · {{ topic.reason }}</p>{% for kw in topic.keywords %}<span class="chip">{{ kw }}</span>{% endfor %}<form method="post"><input type="hidden" name="action" value="select_topic"><input type="hidden" name="topic_index" value="{{ loop.index0 }}"><button class="primary small">선택</button></form></div>{% endfor %}</div>{% endif %}{% if ws.post_title %}<div class="panel"><h3>2-2 · 본문 생성</h3>{% if ws.quick_generate_running %}<p class="notice warn">⚡ 본문+이미지 백그라운드 작성이 진행 중입니다. 발행 메뉴 상단에서 진행 상황을 확인하세요.</p>{% endif %}<form method="post"><div class="grid3"><div><label>제목</label><input name="title" value="{{ ws.post_title }}"></div><div><label>톤앤매너</label><select name="tone"><option>정보전달</option><option>친근한</option><option>전문적</option><option>뉴스형</option></select></div><div><label>키워드</label><input name="keywords" value="{{ (ws.post_topic.keywords if ws.post_topic else ws.selected_keywords)|join(', ') }}"></div></div><div class="grid2"><button class="primary" name="action" value="generate_post">본문 생성</button><button class="success" name="action" value="quick_generate">⚡ 본문+이미지 동시 작성 (백그라운드)</button></div></form></div>{% endif %}{% if ws.post_content_html %}<div class="grid2"><div class="panel"><h3>본문 편집</h3><form method="post"><input type="hidden" name="action" value="save_edits"><label>제목</label><input name="title" value="{{ ws.post_title }}"><label>HTML 본문</label><textarea name="content_html" style="min-height:420px">{{ ws.post_content_html }}</textarea><label>태그</label><input name="tags" value="{{ ws.post_tags|join(', ') }}"><label>메타 설명</label><textarea name="meta_description" style="min-height:70px">{{ ws.post_meta_desc }}</textarea><button class="primary">저장</button></form><hr><form method="post"><input type="hidden" name="action" value="refine"><input type="hidden" name="content_html" value="{{ ws.post_content_html }}"><label>AI 수정 요청</label><input name="instruction" placeholder="예: 더 친근하게"><button>AI 수정 적용</button></form></div><div class="panel"><h3>미리보기</h3><div class="preview"><h2>{{ ws.post_title }}</h2>{{ ws.post_content_html|safe }}</div><p><a class="btn primary" href="{{ url_for('media') }}">미디어로 이동</a></p></div></div>{% endif %}{% endif %}
+<div class="header">✍️ STEP 2 · 콘텐츠 작성</div>{% if not ws.selected_keywords %}<div class="notice warn">먼저 트렌드 수집에서 키워드를 선택해주세요.</div>{% else %}<div class="panel"><h3>2-1 · 주제 선정</h3><p>{% for kw in ws.selected_keywords %}<span class="chip">{{ kw }}</span>{% endfor %}</p><form method="post" class="inline"><input type="hidden" name="action" value="suggest_topics"><label>추천 주제 수 <input type="number" name="topic_count" value="10" min="3" max="15"></label><button class="primary">주제 추천 받기</button></form><form method="post"><input type="hidden" name="action" value="custom_title"><label>직접 제목 입력</label><div class="inline"><input name="post_title" value="{{ ws.post_title }}"><button>이 제목 사용</button></div></form></div>{% if ws.topics %}<div class="panel"><h3>추천 주제 목록</h3>{% for topic in ws.topics %}<div class="card"><h4>{{ loop.index }}. {{ topic.title }}</h4><p class="muted">{{ topic.topic }} · {{ topic.reason }}</p>{% for kw in topic.keywords %}<span class="chip">{{ kw }}</span>{% endfor %}<form method="post"><input type="hidden" name="action" value="select_topic"><input type="hidden" name="topic_index" value="{{ loop.index0 }}"><button class="primary small">선택</button></form></div>{% endfor %}</div>{% endif %}{% if ws.post_title %}<div class="panel"><h3>2-2 · 본문 생성</h3>{% if ws.quick_generate_running %}<p class="notice warn">⚡ 본문+이미지 백그라운드 작성이 진행 중입니다. 발행 메뉴 상단에서 진행 상황을 확인하세요.</p>{% endif %}<form method="post"><div class="grid3"><div><label>제목</label><input name="title" value="{{ ws.post_title }}"></div><div><label>톤앤매너</label><select name="tone"><option>정보전달</option><option>친근한</option><option>전문적</option><option>뉴스형</option></select></div><div><label>키워드</label><input name="keywords" value="{{ (ws.post_topic.keywords if ws.post_topic else ws.selected_keywords)|join(', ') }}"></div></div><div class="grid2"><button class="primary" name="action" value="generate_post">본문 생성</button><button class="success" name="action" value="quick_generate">⚡ 본문+이미지 동시 작성 (백그라운드)</button></div></form></div>{% endif %}{% if ws.post_content_html %}<div class="grid2"><div class="panel"><h3>본문 편집</h3><form method="post"><input type="hidden" name="action" value="save_edits"><label>제목</label><input name="title" value="{{ ws.post_title }}"><label>HTML 본문</label><textarea name="content_html" style="min-height:420px">{{ ws.post_content_html }}</textarea><label>태그</label><input name="tags" value="{{ ws.post_tags|join(', ') }}"><label>메타 설명</label><textarea name="meta_description" style="min-height:70px">{{ ws.post_meta_desc }}</textarea><button class="primary">저장</button></form><hr><form method="post"><input type="hidden" name="action" value="refine"><label>AI 수정 요청</label><input name="instruction" placeholder="예: 더 친근하게" required><button>AI 수정 적용</button></form></div><div class="panel"><h3>미리보기</h3><div class="preview"><h2>{{ ws.post_title }}</h2>{{ ws.post_content_html|safe }}</div><p><a class="btn primary" href="{{ url_for('media') }}">미디어로 이동</a></p></div></div>{% endif %}{% endif %}
 """
 
 MEDIA_TEMPLATE = """
@@ -926,7 +988,7 @@ MEDIA_TEMPLATE = """
 """
 
 PUBLISH_TEMPLATE = """
-<div class="header">🚀 STEP 4 · 발행</div>{% if ws.quick_generate_running %}<div class="panel"><h3>⚡ 본문+이미지 백그라운드 작성 중...</h3><pre>{{ ws.quick_generate_log|join('\n') if ws.quick_generate_log else '시작하는 중...' }}</pre><p class="muted"><a class="btn" href="{{ url_for('publish') }}">🔄 지금 새로고침</a> · 완료되면 자동으로도 새로고침됩니다.</p><script>setTimeout(function(){ location.reload(); }, 2000);</script></div>{% elif ws.quick_generate_log %}<div class="panel"><h3>⚡ 백그라운드 작성 결과</h3><pre>{{ ws.quick_generate_log|join('\n') }}</pre>{% if ws.quick_generate_error %}<p class="notice error">{{ ws.quick_generate_error }}</p>{% else %}<p class="notice success">완료됐습니다. 아래에서 바로 확인/발행하세요.</p>{% endif %}<form method="post"><button name="action" value="dismiss_quick_generate">확인</button></form></div>{% endif %}{% if not final_html %}<div class="notice warn">콘텐츠를 먼저 작성해주세요.</div>{% else %}<div class="grid2"><div class="panel"><h3>최종 미리보기</h3><div class="preview"><h1>{{ ws.post_title }}</h1><p class="muted">태그: {{ ws.post_tags|join(', ') }}</p><hr>{{ final_html|safe }}</div></div><div class="panel" id="publish-panel"><h3>발행 설정</h3><form method="post"><label>제목 최종 확인</label><input name="title" value="{{ ws.post_title }}"><div class="grid2"><button name="action" value="save_local">로컬 저장</button><button name="action" value="blogger_draft">Blogger 임시저장</button><button class="primary" name="action" value="blogger_publish">구글 발행</button><button class="success" name="action" value="naver_publish">네이버 발행</button></div></form><hr><form method="post"><button name="action" value="refresh_recent">최근 Blogger 포스팅 새로고침</button></form><p><a href="{{ url_for('saved') }}">저장된 글 관리로 이동</a></p></div></div>{% endif %}{% if ws.publish_result %}<div class="panel"><h3>Blogger 결과</h3>{% if ws.publish_result.error %}<p class="notice error">{{ ws.publish_result.error }}</p>{% else %}<p class="notice success">성공: <a href="{{ ws.publish_result.url }}" target="_blank">{{ ws.publish_result.url }}</a></p>{% endif %}</div>{% endif %}<div id="naver-progress">{% if ws.naver_publish_running %}<div class="panel"><h3>🟢 네이버 발행 진행 중...</h3><pre>{{ ws.naver_publish_log|join('\n') if ws.naver_publish_log else '시작하는 중...' }}</pre><p class="muted">보통 30초~1분 정도 걸립니다. 이 화면은 2초마다 자동으로 새로고침됩니다.</p><script>setTimeout(function(){ location.reload(); }, 2000);</script></div>{% endif %}{% if ws.naver_publish_result %}<div class="panel"><h3>네이버 결과</h3>{% if ws.naver_publish_result.error %}<p class="notice error">{{ ws.naver_publish_result.error }}</p>{% if ws.naver_publish_result.screenshot %}<p class="muted">스크린샷: {{ ws.naver_publish_result.screenshot }}</p>{% endif %}{% else %}<p class="notice success">성공: <a href="{{ ws.naver_publish_result.url }}" target="_blank">{{ ws.naver_publish_result.url }}</a></p>{% endif %}</div>{% endif %}</div>{% if ws.publish_result or ws.naver_publish_result %}<div class="panel"><form method="post"><button class="primary" name="action" value="new_post">✏️ 새 글 쓰기</button></form></div>{% endif %}{% if ws.naver_publish_running or ws.naver_publish_result %}<script>document.addEventListener('DOMContentLoaded',function(){var el=document.getElementById('naver-progress');if(el)el.scrollIntoView({block:'start'});});</script>{% elif ws.publish_result %}<script>document.addEventListener('DOMContentLoaded',function(){var el=document.getElementById('publish-panel');if(el)el.scrollIntoView({block:'start'});});</script>{% endif %}{% if ws.blogger_recent_posts %}<div class="panel"><h3>최근 Blogger 포스팅</h3>{% for p in ws.blogger_recent_posts %}<div class="card inline"><span>{{ '🟢' if p.status == 'LIVE' else '📝' }}</span><a href="{{ p.url }}" target="_blank">{{ p.title }}</a><span class="muted">{{ p.published[:10] if p.published }}</span><form method="post"><input type="hidden" name="post_id" value="{{ p.id }}"><button class="small danger" name="action" value="delete_blogger">삭제</button></form></div>{% endfor %}</div>{% endif %}
+<div class="header">🚀 STEP 4 · 발행</div>{% if ws.quick_generate_running %}<div class="panel"><h3>⚡ 본문+이미지 백그라운드 작성 중...</h3><pre>{{ ws.quick_generate_log|join('\n') if ws.quick_generate_log else '시작하는 중...' }}</pre><p class="muted"><a class="btn" href="{{ url_for('publish') }}">🔄 지금 새로고침</a> · 완료되면 자동으로도 새로고침됩니다.</p><script>setTimeout(function(){ location.reload(); }, 2000);</script></div>{% elif ws.quick_generate_log %}<div class="panel"><h3>⚡ 백그라운드 작성 결과</h3><pre>{{ ws.quick_generate_log|join('\n') }}</pre>{% if ws.quick_generate_error %}<p class="notice error">{{ ws.quick_generate_error }}</p>{% else %}<p class="notice success">완료됐습니다. 아래에서 바로 확인/발행하세요.</p>{% endif %}<form method="post"><button name="action" value="dismiss_quick_generate">확인</button></form></div>{% endif %}{% if not final_html %}<div class="notice warn">콘텐츠를 먼저 작성해주세요.</div>{% else %}<div class="grid2"><div class="panel"><h3>최종 미리보기</h3><div class="preview"><h1>{{ ws.post_title }}</h1><p class="muted">태그: {{ ws.post_tags|join(', ') }}</p><hr>{{ final_html|safe }}</div></div><div class="panel" id="publish-panel"><h3>발행 설정</h3><form method="post"><label>제목 최종 확인</label><input name="title" value="{{ ws.post_title }}"><div class="grid2"><button name="action" value="save_local">로컬 저장</button><button name="action" value="blogger_draft">Blogger 임시저장</button><button class="primary" name="action" value="blogger_publish">구글 발행</button><button class="success" name="action" value="naver_publish">네이버 발행</button></div></form><hr><form method="post"><button name="action" value="refresh_recent">최근 Blogger 포스팅 새로고침</button></form><p><a href="{{ url_for('saved') }}">저장된 글 관리로 이동</a></p></div></div>{% endif %}{% if final_html %}<div class="panel" id="naver-manual"><h3>🟢 네이버 수동 발행용 (블록별 복사)</h3><p class="muted">자동 발행이 막히거나 직접 붙여넣고 싶을 때, 아래 블록을 순서대로 복사해 네이버 스마트에디터에 붙여넣으세요. 이미지는 다운로드하거나 클립보드로 바로 복사해 붙여넣을 수 있습니다.</p>{% if not ws.naver_content_html %}<p class="notice warn">콘텐츠 작성 단계에서 이미지 생성까지 완료하면 네이버용 버전이 여기 준비됩니다.</p>{% else %}<div class="nvblock"><div class="nvblock-content">{{ ws.post_title }}</div><div class="inline nvblock-actions"><button type="button" class="small nv-copy-text">📋 제목 복사</button></div></div><div class="nvblock"><div class="nvblock-content">{{ ws.post_tags|join(', ') }}</div><div class="inline nvblock-actions"><button type="button" class="small nv-copy-text">📋 태그 복사</button></div></div>{% for block in naver_blocks %}<div class="nvblock"><div class="nvblock-content">{{ block.html|safe }}</div><div class="inline nvblock-actions">{% if block.img_url %}<button type="button" class="small nv-download-img" data-url="{{ block.img_url }}">⬇️ 이미지 다운로드</button><button type="button" class="small nv-copy-img" data-url="{{ block.img_url }}">🖼️ 이미지 복사</button>{% else %}<button type="button" class="small nv-copy-text">📋 텍스트 복사</button>{% endif %}</div></div>{% endfor %}<script>(function(){function flash(btn){var t=btn.textContent;btn.textContent='✅ 복사됨';setTimeout(function(){btn.textContent=t;},1500);}document.querySelectorAll('#naver-manual .nv-copy-text').forEach(function(btn){btn.addEventListener('click',function(){var el=btn.closest('.nvblock').querySelector('.nvblock-content');navigator.clipboard.writeText(el.innerText.trim()).then(function(){flash(btn);}).catch(function(){alert('복사 실패: 브라우저 클립보드 권한을 확인해주세요.');});});});document.querySelectorAll('#naver-manual .nv-download-img').forEach(function(btn){btn.addEventListener('click',function(){var url=btn.dataset.url;fetch(url).then(function(r){return r.blob();}).then(function(blob){var a=document.createElement('a');var objUrl=URL.createObjectURL(blob);a.href=objUrl;a.download='naver-image.jpg';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(objUrl);}).catch(function(){window.open(url,'_blank');});});});document.querySelectorAll('#naver-manual .nv-copy-img').forEach(function(btn){btn.addEventListener('click',function(){var url=btn.dataset.url;fetch(url).then(function(r){return r.blob();}).then(function(blob){return navigator.clipboard.write([new ClipboardItem({[blob.type]:blob})]);}).then(function(){flash(btn);}).catch(function(){alert('이미지 복사에 실패했습니다 (브라우저가 지원하지 않을 수 있어요). 다운로드 버튼을 이용해주세요.');});});});})();</script>{% endif %}</div>{% endif %}{% if ws.publish_result %}<div class="panel"><h3>Blogger 결과</h3>{% if ws.publish_result.error %}<p class="notice error">{{ ws.publish_result.error }}</p>{% else %}<p class="notice success">성공: <a href="{{ ws.publish_result.url }}" target="_blank">{{ ws.publish_result.url }}</a></p>{% endif %}</div>{% endif %}<div id="naver-progress">{% if ws.naver_publish_running %}<div class="panel"><h3>🟢 네이버 발행 진행 중...</h3><pre>{{ ws.naver_publish_log|join('\n') if ws.naver_publish_log else '시작하는 중...' }}</pre><p class="muted">보통 30초~1분 정도 걸립니다. 이 화면은 2초마다 자동으로 새로고침됩니다.</p><script>setTimeout(function(){ location.reload(); }, 2000);</script></div>{% endif %}{% if ws.naver_publish_result %}<div class="panel"><h3>네이버 결과</h3>{% if ws.naver_publish_result.error %}<p class="notice error">{{ ws.naver_publish_result.error }}</p>{% if ws.naver_publish_result.screenshot %}<p class="muted">스크린샷: {{ ws.naver_publish_result.screenshot }}</p>{% endif %}{% else %}<p class="notice success">성공: <a href="{{ ws.naver_publish_result.url }}" target="_blank">{{ ws.naver_publish_result.url }}</a></p>{% endif %}</div>{% endif %}</div>{% if ws.publish_result or ws.naver_publish_result %}<div class="panel"><form method="post"><button class="primary" name="action" value="new_post">✏️ 새 글 쓰기</button></form></div>{% endif %}{% if ws.naver_publish_running or ws.naver_publish_result %}<script>document.addEventListener('DOMContentLoaded',function(){var el=document.getElementById('naver-progress');if(el)el.scrollIntoView({block:'start'});});</script>{% elif ws.publish_result %}<script>document.addEventListener('DOMContentLoaded',function(){var el=document.getElementById('publish-panel');if(el)el.scrollIntoView({block:'start'});});</script>{% endif %}{% if ws.blogger_recent_posts %}<div class="panel"><h3>최근 Blogger 포스팅</h3>{% for p in ws.blogger_recent_posts %}<div class="card inline"><span>{{ '🟢' if p.status == 'LIVE' else '📝' }}</span><a href="{{ p.url }}" target="_blank">{{ p.title }}</a><span class="muted">{{ p.published[:10] if p.published }}</span><form method="post"><input type="hidden" name="post_id" value="{{ p.id }}"><button class="small danger" name="action" value="delete_blogger">삭제</button></form></div>{% endfor %}</div>{% endif %}
 """
 
 SAVED_TEMPLATE = """
