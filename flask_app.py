@@ -894,6 +894,7 @@ summary { cursor:pointer; font-weight:800; }
     border-bottom:1px solid var(--line);
   }
   .bg-status { max-width:150px; }
+  .user-logout-btn { max-width:55vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   /* 햄버거 버튼: topbar 안의 일반 flex 아이템으로 배치 (더 이상 position:fixed 아님) */
   .topbar .nav-toggle-label {
     display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto;
@@ -956,7 +957,7 @@ BASE_TEMPLATE = """
 <a class="nav-link {{ 'active' if active=='logs' else '' }}" href="{{ url_for('logs') }}">🪵 오류 로그</a>
 <a class="nav-link {{ 'active' if active=='manual' else '' }}" href="{{ url_for('manual') }}">📚 매뉴얼</a>
 <div class="status"><b>API 상태</b><br>{{ '✅' if status.llm.vllm_available else '❌' }} vLLM · {{ '✅' if status.llm.claude_available else '⚪' }} Claude<br>{{ '✅' if status.blogger.ready else '❌' }} Blogger · {{ '✅' if status.naver.ready else '❌' }} 네이버<br>🖼️ {{ status.image_provider }}</div>
-</aside><main><div class="topbar"><label for="nav-toggle" class="nav-toggle-label" aria-label="메뉴 열기">☰</label>{% if ws.quick_generate_running or ws.naver_publish_running %}<a href="{{ url_for('publish') }}" class="bg-status">{% if ws.quick_generate_running %}⚡ 본문+이미지 작성 중…{% endif %}{% if ws.quick_generate_running and ws.naver_publish_running %} · {% endif %}{% if ws.naver_publish_running %}🟢 네이버 발행 중…{% endif %}</a>{% endif %}<div class="inline" style="margin-left:auto"><div class="muted">{{ user }} 로그인됨</div><form method="post" action="{{ url_for('logout') }}"><button class="small" type="submit">로그아웃</button></form></div></div>
+</aside><main><div class="topbar"><label for="nav-toggle" class="nav-toggle-label" aria-label="메뉴 열기">☰</label>{% if ws.quick_generate_running or ws.naver_publish_running %}<a href="{{ url_for('publish') }}" class="bg-status">{% if ws.quick_generate_running %}⚡ 본문+이미지 작성 중…{% endif %}{% if ws.quick_generate_running and ws.naver_publish_running %} · {% endif %}{% if ws.naver_publish_running %}🟢 네이버 발행 중…{% endif %}</a>{% endif %}<div class="inline" style="margin-left:auto"><form method="post" action="{{ url_for('logout') }}"><button class="small user-logout-btn" type="submit" title="클릭하면 로그아웃됩니다">👤 {{ user }} · 로그아웃</button></form></div></div>
 {% with messages = get_flashed_messages(with_categories=true) %}{% for cat,msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}{% endwith %}
 {{ body|safe }}</main></div></body></html>
 """
