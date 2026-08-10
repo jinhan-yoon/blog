@@ -1,31 +1,126 @@
 # 🤖 AI 블로그 자동화 대시보드
 
-Google Trends → AI 콘텐츠 생성 → 이미지 생성 → Google Blogger 발행까지 전 과정을 자동화하는 Flask 기반 웹 앱.
+Google Trends → AI 콘텐츠 생성 → 이미지 생성 → Google Blogger / 네이버 블로그 발행까지 전 과정을 자동화하는 Flask 기반 웹 앱.
+
+이 문서는 처음 보는 사람도 프로그램 구조를 이해하고, 서버에 설치하고, 화면을 사용할 수 있도록 작성되었습니다.
+
+---
+
+## 📑 목차
+
+1. [전체 파이프라인](#-전체-파이프라인)
+2. [아키텍처](#-아키텍처)
+   - [물리 구성 (인프라)](#물리-구성-인프라)
+   - [논리 구성 (앱 내부 동작)](#논리-구성-앱-내부-동작)
+3. [관련 기술](#-관련-기술)
+4. [프로젝트 구조](#-프로젝트-구조)
+5. [서버 설치 방법](#-서버-설치-방법)
+6. [로컬 개발 실행 방법](#-로컬-개발-실행-방법)
+7. [환경 변수 (.env)](#️-환경-변수-env)
+8. [메뉴별 사용법](#-메뉴별-사용법-초보자용)
+9. [네이버 블로그 발행 설정](#-네이버-블로그-발행-설정)
+10. [Google Blogger OAuth 설정](#-google-blogger-oauth-설정)
+11. [앱 로그인](#-앱-로그인)
+12. [이미지 생성 프로바이더](#️-이미지-생성-프로바이더)
+13. [LLM 자동 Fallback](#-llm-자동-fallback)
+14. [AI 감지 회피](#-ai-감지-회피-google-adsense-최적화)
+15. [자주 발생하는 문제](#-자주-발생하는-문제)
+16. [주요 변경 이력](#-주요-변경-이력)
 
 ---
 
 ## 🔄 전체 파이프라인
 
 ```
-트렌드 수집 → 키워드 선택 → 주제 추천 → 본문 생성 → 이미지 생성 → Blogger 발행
- (구글/네이버)    (수동)      (vLLM/Claude) (vLLM/Claude) (Pollinations 등) (OAuth 2.0)
+트렌드 수집 → 키워드 선택 → 주제 추천 → 본문 생성 → 이미지 생성 → 발행(Blogger/네이버)
+ (구글/네이버)    (수동)      (vLLM/Claude) (vLLM/Claude) (Pollinations 등)  (OAuth 2.0 / Playwright)
 ```
+
+이 5단계가 사이드바 메뉴(트렌드 수집 → 콘텐츠 작성 → 미디어 → 발행)와 그대로 대응됩니다.
 
 ---
 
-## 🏗️ 기술 스택
+## 🏛 아키텍처
+
+### 물리 구성 (인프라)
+
+"물리 구성"은 코드가 실제로 어떤 컴퓨터/서비스 위에서 돌아가는지를 말합니다. 이 프로젝트는 **개발 PC → GitHub → 운영 서버**로 이어지는 CI/CD 구조입니다.
+
+```mermaid
+flowchart TB
+    subgraph DEV["개발 PC (Windows)"]
+        A[코드 수정] --> B[git push origin main]
+    end
+
+    B --> C[GitHub 저장소<br/>jinhan-yoon/blog]
+    C --> D["GitHub Actions #1: validate<br/>(ubuntu-latest, py_compile 문법 검증)"]
+    D -->|성공 시에만| E["GitHub Actions #2: deploy<br/>(self-hosted runner = 운영 서버)"]
+
+    E --> F[git reset --hard origin/main]
+    F --> G[venv/bin/pip install -r requirements.txt]
+    G --> H[systemd: blog-flask.service 재시작]
+    H --> I["Flask 앱 (0.0.0.0:8501)"]
+
+    I --> J[Nginx / WAF<br/>리버스 프록시 + HTTPS]
+    J --> K["사용자 브라우저<br/>https://blog.superip.net"]
+
+    I -.->|외부 API 호출| L[vLLM 서버<br/>사내 GPU 서버]
+    I -.->|fallback| M[Anthropic Claude API]
+    I -.->|이미지 생성| N["Pollinations / HuggingFace / DALL-E"]
+    I -.->|Blogger 발행| O[Google Blogger API v3]
+    I -.->|네이버 발행| P["Playwright + Chromium<br/>(네이버 블로그 UI 직접 조작)"]
+
+    style DEV fill:#eef2ff,stroke:#3730a3
+    style I fill:#dcfce7,stroke:#16a34a
+```
+
+**핵심 포인트**
+- 배포는 `main` 브랜치에 **push하는 순간 자동 실행**됩니다 (`.github/workflows/deploy.yml`). 별도 배포 명령이 필요 없습니다.
+- `validate` 단계가 실패하면(문법 오류 등) `deploy` 단계는 아예 실행되지 않아, 깨진 코드가 운영 서버에 올라가는 걸 막아줍니다.
+- 실제 배포는 **self-hosted runner**(운영 서버에 직접 설치된 GitHub Actions 러너)가 수행합니다 — GitHub이 서버에 접속하는 게 아니라, 서버가 GitHub에 접속해서 작업을 받아옵니다.
+- 앱은 `systemd` 서비스(`blog-flask.service`)로 등록되어 있어 서버 재부팅 시에도 자동 시작되고, 죽으면 자동 재시작됩니다(`Restart=on-failure`).
+- vLLM, Claude, 이미지 생성, Blogger, 네이버는 전부 **외부 서비스**이며 앱은 이들을 호출하는 클라이언트 역할만 합니다 — DB 서버 같은 건 없습니다.
+
+### 논리 구성 (앱 내부 동작)
+
+"논리 구성"은 사용자의 클릭 한 번이 코드 안에서 어떻게 흘러가는지를 말합니다.
+
+```mermaid
+flowchart LR
+    U[사용자 브라우저] -->|HTTP 요청| R["Flask 라우트<br/>(flask_app.py)"]
+    R --> WS["워크스페이스(ws)<br/>세션별 in-memory dict"]
+    R --> MOD["modules/*.py<br/>(기능별 모듈)"]
+    MOD --> EXT["외부 API<br/>(vLLM/Claude/이미지/Blogger/네이버)"]
+    EXT --> MOD
+    MOD --> WS
+    WS --> R
+    R -->|HTML 응답<br/>Jinja 템플릿| U
+    WS -.->|자동 저장| DATA["data/*.json<br/>(로컬 파일)"]
+```
+
+- **워크스페이스(`ws`)**: 로그인한 사용자마다 브라우저 쿠키(`blog_workspace_id`)로 구분되는 작업 상태(dict)입니다. 트렌드, 선택 키워드, 본문, 이미지, 발행 결과 등 "지금 작업 중인 글"의 모든 상태가 여기 담깁니다. **서버 프로세스 메모리에만 있으므로 서버가 재시작되면 사라집니다** (그래서 본문/이미지가 생길 때마다 `data/`에 자동 저장됩니다).
+- **modules/**: 기능별로 분리된 순수 로직 계층입니다. Flask 라우트는 요청을 받아 workspace를 읽고, 필요한 모듈 함수를 호출하고, 결과를 다시 workspace에 저장한 뒤 화면을 그리는 역할만 합니다.
+- **템플릿**: 별도의 `.html` 파일 없이 `flask_app.py` 안에 Jinja 템플릿 문자열(`TRENDS_TEMPLATE`, `CONTENT_TEMPLATE` 등)로 정의되어 있습니다. 전체 페이지 골격은 `BASE_TEMPLATE`(사이드바 + 상단바)이고, 각 메뉴는 그 안의 `body` 자리에 끼워집니다.
+- **백그라운드 작업**: "본문+이미지 동시 작성"이나 "네이버 발행"처럼 오래 걸리는 작업은 `threading.Thread`로 백그라운드 실행되고, 화면은 2초마다 자동 새로고침되며 진행 상황(`ws["quick_generate_log"]` 등)을 보여줍니다.
+
+---
+
+## 🏗️ 관련 기술
 
 | 분류 | 기술 | 비고 |
 |------|------|------|
-| 웹 프레임워크 | Flask ≥ 3.0 | 서버 세션 기반 대시보드 |
+| 웹 프레임워크 | Flask ≥ 3.0 | 서버 세션(워크스페이스) 기반 대시보드, 별도 프론트엔드 프레임워크 없이 서버 렌더링 |
+| 배포/CI-CD | GitHub Actions (self-hosted runner) | `main` push 시 문법 검증 → 자동 배포 |
+| 프로세스 관리 | systemd | `blog-flask.service`, 자동 재시작 |
 | LLM (1순위) | vLLM (자체 호스팅) | Google Gemma 4 31B-it, OpenAI 호환 API |
-| LLM (fallback) | Anthropic Claude API | claude-sonnet-4-6 기본값 |
+| LLM (fallback) | Anthropic Claude API | `claude-sonnet-4-6` 기본값 |
 | 이미지 생성 | Pollinations.ai | 무료, API 키 불필요 (기본값) |
 | 이미지 생성 | HuggingFace SD XL | 무료 토큰 필요 |
 | 이미지 생성 | DALL-E 3 | 유료, OpenAI API 키 필요 |
-| 트렌드 수집 | Loword API + Google Trends RSS + signal.bz | 실시간 급상승 검색어 |
+| 브라우저 자동화 | Playwright (Chromium) | 네이버 블로그 발행 (공식 API 없음) |
+| 트렌드 수집 | Google News IT/테크 RSS | 실시간 IT 뉴스 키워드 |
 | 발행 | Google Blogger API v3 | OAuth 2.0 (PKCE S256) |
-| 발행 | 네이버 블로그 (Playwright) | 공식 API 없음, UI 자동화 |
+| 로그인 | 비밀번호 또는 Google OAuth (openid/email) | 서명된 쿠키로 세션 유지 |
 | 환경 변수 | python-dotenv | `.env` 파일 |
 
 ---
@@ -34,57 +129,88 @@ Google Trends → AI 콘텐츠 생성 → 이미지 생성 → Google Blogger �
 
 ```
 blog/
-├── flask_app.py              # 메인 Flask 앱 (대시보드/로그인/발행)
-├── app.py                    # 이전 Streamlit 앱 (레거시)
-├── requirements.txt          # Python 패키지 목록
-├── .env                      # 환경 변수 (API 키 등, git 제외)
-├── .env.example              # 환경 변수 예시
-├── client_secret.json        # Google OAuth 클라이언트 비밀키 (git 제외)
-├── token.json                # Google OAuth 토큰 (git 제외, 자동 생성)
-├── data/                     # 로컬 저장 포스팅 (JSON)
-├── naver_setup.py            # 네이버 최초 1회 수동 로그인 → 세션 저장 스크립트
-├── naver_session.json        # 네이버 로그인 세션 (git 제외, naver_setup.py로 자동 생성)
-├── naver_errors/             # 네이버 발행 실패 시 스크린샷 저장 (git 제외)
+├── flask_app.py               # 메인 Flask 앱 — 라우트, 템플릿(HTML), CSS, 워크스페이스 상태
+├── app.py                     # 이전 Streamlit 앱 (레거시, 더 이상 사용/배포되지 않음)
+├── naver_setup.py             # 네이버 최초 1회 수동 로그인 → 세션 저장 스크립트
+├── debug_google_login.py      # 구글 로그인 디버깅용 스크립트
+├── requirements.txt           # Python 패키지 목록
+├── run.sh                     # 로컬 실행 스크립트
+├── server-setup.sh            # 운영 서버 최초 1회 설치 스크립트
+├── blog-flask.service         # systemd 서비스 유닛 템플릿 (%i = 배포 유저명)
+├── .github/workflows/deploy.yml  # 검증 + 자동 배포 파이프라인
+├── .streamlit/config.toml     # app.py(레거시)용 Streamlit 설정
+├── .env                       # 환경 변수 (API 키 등, git 제외)
+├── .env.example                # 환경 변수 예시
+├── client_secret.json         # Google Blogger OAuth 클라이언트 비밀키 (git 제외)
+├── login_client_secret.json   # 앱 로그인용 Google OAuth 클라이언트 비밀키 (git 제외)
+├── token.json                 # Google Blogger OAuth 토큰 (git 제외, 자동 생성)
+├── naver_session.json         # 네이버 로그인 세션 (git 제외, naver_setup.py로 자동 생성)
+├── naver_errors/              # 네이버 발행 실패 시 스크린샷 저장 (git 제외)
+├── data/                      # 로컬 저장 포스팅 (JSON, 작성 중 자동 저장 + "저장된 글" 메뉴)
 └── modules/
-    ├── trend_collector.py    # 트렌드 수집 (Loword + Google RSS + signal.bz)
-    ├── content_generator.py  # LLM 콘텐츠 생성 (vLLM → Claude 자동 fallback)
-    ├── image_generator.py    # 이미지 생성 (다중 프로바이더, 자동 fallback)
-    ├── blogger_publisher.py  # Google Blogger API 발행 (PKCE OAuth)
-    └── naver_blog_poster.py  # 네이버 블로그 발행 (Playwright UI 자동화)
+    ├── trend_collector.py     # 트렌드 수집 (Google News IT/테크 RSS)
+    ├── content_generator.py   # LLM 콘텐츠 생성/수정 (vLLM → Claude 자동 fallback)
+    ├── image_generator.py     # 이미지 생성 (다중 프로바이더, 자동 fallback)
+    ├── blogger_publisher.py   # Google Blogger API 발행 (PKCE OAuth)
+    ├── naver_blog_poster.py   # 네이버 블로그 발행 (Playwright UI 자동화)
+    └── app_auth.py            # 앱 로그인 (비밀번호 / 구글 계정, 서명된 쿠키 세션)
 ```
 
 ---
 
-## ⚙️ 환경 변수 (.env)
+## 🚀 서버 설치 방법
 
-```env
-# LLM 서버 (vLLM)
-LLM_ADDR=http://192.168.1.1:8000
-LLM_MODEL=google/gemma-4-31b-it
-LLM_API_KEY=EMPTY
+운영 서버(리눅스)에 처음 설치할 때의 절차입니다. 이미 서버가 세팅되어 있다면 이 단계는 건너뛰고 [메뉴별 사용법](#-메뉴별-사용법-초보자용)으로 이동하세요.
 
-# LLM Fallback / 이미지
-ANTHROPIC_API_KEY=sk-ant-...
-CLAUDE_MODEL=claude-sonnet-4-6
+### 1. 서버에서 최초 1회 설치 스크립트 실행
 
-# 이미지 생성
-IMAGE_PROVIDER=pollinations        # pollinations | huggingface | claude | dalle
-OPENAI_API_KEY=sk-...              # DALL-E 3용 (선택)
-HUGGINGFACE_TOKEN=hf_...           # HuggingFace SD XL용 (선택)
-
-# Google Blogger
-BLOGGER_BLOG_ID=1234567890123456789
-BLOGGER_BLOG_URL=https://superipnet.blogspot.com   # 네이버 글 상하단에 넣을 방문 링크
-
-# 네이버 블로그 (Playwright UI 자동화, 공식 API 없음)
-NAVER_ID=your_naver_id
-NAVER_PW=your_naver_password
-NAVER_BLOG_ID=your_naver_blog_id
+```bash
+# 서버에 SSH로 접속한 뒤
+curl -O https://raw.githubusercontent.com/jinhan-yoon/blog/main/server-setup.sh
+bash server-setup.sh <배포할_리눅스_유저명>
+# 예: bash server-setup.sh jinhan2
 ```
+
+이 스크립트가 자동으로 해주는 일:
+1. Python 3 설치 확인
+2. `git clone`으로 저장소를 `/home/<유저명>/blog`에 내려받기
+3. 가상환경(`venv`) 생성 + `requirements.txt` 설치
+4. `.env.example` → `.env` 복사 (이후 직접 값을 채워야 함)
+5. `blog-flask.service`를 systemd에 등록하고 시작
+
+### 2. `.env` 값 채우기
+
+```bash
+vi /home/<유저명>/blog/.env
+```
+
+[환경 변수 (.env)](#️-환경-변수-env) 절을 참고해 LLM/이미지/Blogger/네이버/로그인 값을 채웁니다.
+
+```bash
+sudo systemctl restart blog-flask.service
+```
+
+### 3. Playwright Chromium 설치 (네이버 발행용)
+
+```bash
+cd /home/<유저명>/blog
+sudo venv/bin/playwright install chromium
+sudo venv/bin/playwright install-deps chromium   # OS 라이브러리(libnss3 등)가 없다면 최초 1회
+```
+
+> 자동 배포 파이프라인은 `playwright install chromium`까지는 매번 자동 실행하지만, `install-deps`(OS 라이브러리)는 서버에 한 번만 수동으로 해주면 됩니다.
+
+### 4. Nginx / WAF (리버스 프록시 + HTTPS)
+
+Flask 앱은 `0.0.0.0:8501`에서 평문 HTTP로 떠 있습니다. 외부에 `https://blog.superip.net` 같은 주소로 노출하려면 앞단에 Nginx(또는 다른 리버스 프록시)로 HTTPS 종료 + 8501 포트 프록시를 별도로 구성해야 합니다 (이 저장소에는 Nginx 설정 파일이 포함되어 있지 않으며, 서버에서 직접 관리합니다).
+
+### 5. GitHub Actions 자동 배포 연결
+
+서버에 [GitHub Actions self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners)를 설치하고 `blog` 라벨을 붙이면, 이후로는 `git push origin main` 한 번으로 검증 → 배포 → 서비스 재시작까지 자동으로 이뤄집니다. (`.github/workflows/deploy.yml`의 `runs-on: [self-hosted, blog]` 참고)
 
 ---
 
-## 🚀 실행 방법
+## 💻 로컬 개발 실행 방법
 
 ```bash
 # 1. 패키지 설치
@@ -102,10 +228,104 @@ python naver_setup.py
 
 # 5. 앱 실행
 python flask_app.py
-
 # 또는 run.sh 사용
 bash run.sh
 ```
+
+기본적으로 `http://localhost:8501` 에서 접속됩니다 (`PORT` 환경 변수로 변경 가능).
+
+---
+
+## ⚙️ 환경 변수 (.env)
+
+```env
+# ── LLM 서버 (vLLM, OpenAI 호환) ──────────────────────────────
+LLM_ADDR=http://192.168.1.1:8000
+LLM_MODEL=google/gemma-4-31b-it
+LLM_API_KEY=EMPTY
+
+# ── LLM Fallback ──────────────────────────────────────────────
+ANTHROPIC_API_KEY=sk-ant-...
+CLAUDE_MODEL=claude-sonnet-4-6
+
+# ── 이미지 생성 ────────────────────────────────────────────────
+IMAGE_PROVIDER=pollinations        # pollinations | huggingface | claude | dalle
+OPENAI_API_KEY=sk-...              # DALL-E 3용 (선택)
+HUGGINGFACE_TOKEN=hf_...           # HuggingFace SD XL용 (선택)
+
+# ── Google Blogger ──────────────────────────────────────────────
+BLOGGER_BLOG_ID=1234567890123456789
+BLOGGER_BLOG_URL=https://superipnet.blogspot.com   # 네이버 글 상하단에 넣을 방문 링크
+
+# ── 네이버 블로그 (Playwright UI 자동화, 공식 API 없음) ────────────
+NAVER_ID=your_naver_id
+NAVER_PW=your_naver_password
+NAVER_BLOG_ID=your_naver_blog_id
+
+# ── 앱 로그인: 비밀번호 방식 (기본, 권장) ───────────────────────────
+APP_PASSWORD=your_strong_password_here
+APP_SESSION_SECRET=                # 비워두면 서버에 .session_secret 파일로 자동 생성됨
+
+# ── 앱 로그인: 구글 계정 방식 (선택, login_client_secret.json 필요) ──
+APP_BASE_URL=https://blog.superip.net
+ALLOWED_GOOGLE_EMAIL=your_google_email_here
+```
+
+`client_secret.json`(Blogger용), `login_client_secret.json`(로그인용), `token.json`, `naver_session.json`은 `.env`가 아니라 별도 파일이며, 설정 화면에서 업로드하거나 `naver_setup.py`로 생성됩니다.
+
+---
+
+## 📖 메뉴별 사용법 (초보자용)
+
+로그인하면 왼쪽 사이드바에 메뉴가 있습니다. **위에서부터 순서대로** 진행하면 됩니다.
+
+### 1️⃣ 📊 트렌드 수집
+
+- **트렌드 수집 시작** 버튼을 누르면 Google News IT/테크 RSS에서 실시간 키워드를 가져옵니다.
+- 원하는 키워드에 체크하거나, "수동 키워드 입력"에 직접 원하는 주제를 적고 **추가**를 눌러도 됩니다.
+- 키워드를 고른 뒤 **선택한 키워드로 콘텐츠 작성** 버튼을 누르면 다음 단계로 이동합니다.
+
+### 2️⃣ ✍️ 콘텐츠 작성
+
+- **2-1 주제 선정**: "주제 추천 받기"를 누르면 AI가 선택한 키워드로 여러 개의 제목 후보를 추천해줍니다. 마음에 드는 걸 **선택**하거나, "직접 제목 입력"으로 원하는 제목을 바로 써도 됩니다.
+- **2-2 본문 생성**: 톤앤매너(정보전달/친근한/전문적/뉴스형)를 고르고 **본문 생성**을 누르면 AI가 본문을 작성합니다.
+  - **⚡ 본문+이미지 동시 작성 (백그라운드)** 버튼을 쓰면 본문과 이미지 3장을 한 번에 백그라운드로 만들어주고, 완료될 때까지 발행 화면 상단에 진행 상황이 표시됩니다. 급할 때 유용합니다.
+- 본문이 생기면 **본문 편집** 패널에서 제목/HTML 본문/태그/메타 설명을 직접 고칠 수 있고, 하단의 **"AI 수정 요청"**에 "더 친근하게", "3번째 문단을 좀 더 자세히" 같은 지시사항을 적고 **AI 수정 적용**을 누르면 AI가 그 지시대로 본문을 다시 다듬어줍니다.
+
+### 3️⃣ 🎨 미디어
+
+- 이미지 생성 방식(Pollinations/HuggingFace/Claude/DALL-E)을 고르고, 이미지 1~3의 설명(프롬프트)을 확인/수정합니다.
+  - 각 입력창 옆의 📋 버튼으로 프롬프트를 바로 복사할 수 있습니다 (Midjourney, Google Flow 같은 다른 이미지/영상 생성 도구에 붙여넣을 때 유용).
+- **이미지 생성 & 삽입**을 누르면 이미지 3장이 만들어지고 본문에 자동으로 삽입됩니다. 결과 카드에서도 📋 버튼으로 실제 사용된 프롬프트를 복사할 수 있습니다.
+- 이미지가 필요 없으면 **이미지 건너뛰기**로 바로 발행 단계로 넘어갈 수 있습니다.
+
+### 4️⃣ 🚀 발행
+
+- **최종 미리보기**로 실제 발행될 모습을 확인합니다.
+- **로컬 저장**: 서버 `data/` 폴더에 JSON으로 저장 (나중에 "저장된 글"에서 다시 불러오기 가능).
+- **Blogger 임시저장 / 구글 발행**: Google Blogger에 초안 저장 또는 즉시 발행.
+- **네이버 발행**: Playwright로 네이버 블로그에 자동 발행 (진행 상황이 화면에 실시간 표시됩니다, 보통 30초~1분).
+- **🟢 네이버 수동 발행용 (블록별 복사)** 패널: 자동 발행이 막히거나 직접 붙여넣고 싶을 때, 제목/태그/본문을 문단·이미지 단위로 잘라 각각 복사 버튼을 제공합니다. 이미지는 다운로드하거나 클립보드로 바로 복사해 네이버 스마트에디터에 붙여넣을 수 있습니다.
+- 발행이 끝나면 **✏️ 새 글 쓰기**로 처음부터 다시 시작할 수 있습니다.
+
+### 5️⃣ 📂 저장된 글
+
+- `data/`에 저장된 글 목록을 보여줍니다. 각 글을 펼쳐서 제목/태그/메타 설명/본문을 직접 수정·저장할 수 있고, **현재 글로 불러오기**(발행 화면으로 이동), **바로 Blogger 발행**, **삭제**가 가능합니다.
+
+### 6️⃣ ⚙️ 설정
+
+- **LLM / 이미지**: vLLM 서버 주소, LLM 모델명, Anthropic/OpenAI/HuggingFace API 키, 기본 이미지 생성 방식을 설정합니다.
+- **블로그 / 로그인**: Blogger Blog ID, 네이버 계정 정보, 앱 로그인 관련 값을 설정합니다. 저장하면 서버의 `.env` 파일이 갱신됩니다.
+- **Google Blogger OAuth**: `client_secret.json` 업로드 → 인증 URL 생성 → 승인 → 코드 붙여넣기 순서로 Blogger 연동을 설정/재설정합니다. ([자세히](#-google-blogger-oauth-설정))
+- **앱 로그인 / 네이버 로그인**: 구글 로그인용 `login_client_secret.json` 업로드, 네이버 로그인 시작(캡차가 뜨면 화면에 그대로 표시되어 앱에서 바로 처리 가능).
+
+### 7️⃣ 🪵 오류 로그
+
+- 네이버 발행이 실패했을 때 자동 저장된 스크린샷(`naver_errors/*.png`) 목록을 보여줍니다. 어느 단계에서 막혔는지 눈으로 확인할 수 있고, 필요 없는 스크린샷은 삭제할 수 있습니다.
+
+### 8️⃣ 📚 매뉴얼
+
+- 앱 안에서 바로 볼 수 있는 사용법 요약 페이지입니다 (이 README의 요약 버전).
 
 ---
 
@@ -175,12 +395,13 @@ rm naver_session.json
 python naver_setup.py --headless
 ```
 
-- 발행이 실패하면 `naver_errors/` 폴더에 실패 시점의 스크린샷이 저장되니, 어느 단계에서 막혔는지 확인할 때 참고하세요.
+- 발행이 실패하면 `naver_errors/` 폴더에 실패 시점의 스크린샷이 저장되니, 어느 단계에서 막혔는지 확인할 때 참고하세요. 앱의 **🪵 오류 로그** 메뉴에서도 바로 볼 수 있습니다.
 - 네이버가 Smart Editor의 화면 구조(클래스명 등)를 변경하면 `modules/naver_blog_poster.py`의 셀렉터 업데이트가 필요할 수 있습니다.
 - 배포 파이프라인은 `playwright install chromium`(브라우저 바이너리)까지만 자동 실행합니다. 서버에 Chromium 실행에 필요한 OS 라이브러리(libnss3 등)가 없다면 최초 1회 아래 명령을 서버에서 직접 실행해주세요:
   ```bash
   sudo venv/bin/playwright install-deps chromium
   ```
+- 자동 발행이 막히거나 급하게 수동으로 올려야 할 때는 발행 화면의 **"네이버 수동 발행용 (블록별 복사)"** 패널을 사용하세요.
 
 ---
 
@@ -197,11 +418,13 @@ python naver_setup.py --headless
 ### 2. 앱에서 인증
 
 1. 설정 탭 → `client_secret.json` 업로드
-2. **🔗 인증 URL 생성** 클릭
+2. **인증 URL 생성** 클릭
 3. URL을 브라우저에서 열고 Google 계정 승인
 4. 브라우저가 `http://localhost/?code=...` 로 이동 → **"연결할 수 없음" 오류는 정상!**
 5. 브라우저 주소창의 전체 URL 복사
-6. 앱의 입력창에 붙여넣기 → **✅ 인증 완료** 클릭
+6. 앱의 입력창에 붙여넣기 → **인증 완료** 클릭
+
+인증이 만료되거나 풀렸을 때도 같은 순서를 다시 밟으면 됩니다. 필요하면 먼저 **토큰 재발급** 버튼으로 기존 `token.json`을 지우고 시작하세요.
 
 ### ⚠️ 자주 발생하는 오류
 
@@ -214,90 +437,30 @@ python naver_setup.py --headless
 
 ---
 
-## 🔒 앱 로그인 게이트
+## 🔒 앱 로그인
 
-### ✅ 현재 사용 중: 구글 계정 방식 (2026-07-28~ 재활성화)
+현재(Flask 버전) 앱은 **비밀번호 로그인**과 **구글 계정 로그인**을 동시에 지원하며, `.env`에 어떤 값이 설정되어 있는지에 따라 로그인 화면에 해당 방법이 자동으로 노출됩니다 (`modules/app_auth.py`의 `is_password_configured()` / `is_configured()`). 별도의 on/off 스위치는 없습니다 — `APP_PASSWORD`를 설정하면 비밀번호 로그인이, `login_client_secret.json` + `ALLOWED_GOOGLE_EMAIL`을 설정하면 구글 로그인이 뜨고, 둘 다 설정하면 둘 다 뜹니다.
 
-`app.py`의 `_LOGIN_GATE_ENABLED = True`로 다시 켜져 있습니다. 원인 불명의
-`invalid_grant`가 하루 종일 반복돼 한때 꺼뒀었지만(README 하단 "현재 상태"
-섹션 참고), 사용자 요청으로 재활성화함 — 재현되는지는 계속 지켜봐야 함.
+### 비밀번호 방식 (가장 간단)
 
-### 🔁 대체 수단: 비밀번호 방식
+1. 서버 `.env`에 `APP_PASSWORD=원하는_비밀번호` 추가
+2. 재배포/재시작하면 로그인 화면에 비밀번호 입력창이 나타납니다.
+3. 로그인 상태는 서명된 쿠키(`blog_auth_token`, 30일)로 유지됩니다.
 
-구글 로그인이 또 막히면 쓸 수 있도록 비밀번호 로그인도 코드로 남겨뒀습니다.
-**구글 게이트가 켜져 있는 동안은 자동으로 건너뛰어지므로(`app.py`의
-`_password_configured() and not _LOGIN_GATE_ENABLED` 조건)**, 지금은 `.env`에
-`APP_PASSWORD`를 설정해도 비밀번호 화면이 뜨지 않습니다. 구글이 다시 막히면
-`app.py`의 `_LOGIN_GATE_ENABLED = False`로 바꾸면 즉시 비밀번호 방식으로 전환됩니다.
+### 구글 계정 방식
 
-- 설정: 서버 `.env`에 `APP_PASSWORD=원하는_비밀번호` 추가 후 재배포/재시작.
-- 로그인 상태는 서명된 쿠키(`blog_auth_token`, 30일)로 유지.
-- 구현: `modules/app_auth.py`의 `check_password()` / `make_password_session_token()` / `verify_password_session_token()`.
-- 로그아웃 시 쿠키 삭제 직후 rerun하면 삭제가 브라우저에 반영되기 전이라 로그아웃이
-  안 된 것처럼 보이는 레이스가 있어(구글 로그인 때와 동일 원인), rerun 대신 새로고침
-  안내 메시지로 처리하도록 고쳐둠.
-
-### 🔧 구글 계정 방식 설정 방법
-
-#### 1. Google Cloud Console에서 별도 OAuth 클라이언트 생성
-
-Blogger 연동용 `client_secret.json`(Desktop app 타입)과는 **다른, 별도의 클라이언트**가 필요합니다.
-Desktop app 타입은 로그인 후 실제 사이트로 자동 복귀가 안 되기 때문입니다.
+Blogger 연동용 `client_secret.json`(Desktop app 타입)과는 **다른, 별도의 OAuth 클라이언트**가 필요합니다.
 
 1. [Google Cloud Console](https://console.cloud.google.com) → **APIs & Services > Credentials**
 2. **Create Credentials > OAuth 2.0 Client ID**
 3. **애플리케이션 유형: Web application** 선택 ← Blogger용과 다름, 반드시 Web application!
 4. **승인된 리디렉션 URI**에 앱 접속 주소를 정확히 등록 (예: `https://blog.superip.net`)
 5. JSON 다운로드 → `login_client_secret.json` 으로 저장
+6. 설정 탭 → **앱 접속 주소** 입력, **로그인 허용 구글 이메일** 입력, `login_client_secret.json` 업로드 → **설정 저장**
 
-#### 2. 앱에서 설정
+저장 직후부터 로그인 화면에 "구글 계정으로 로그인" 링크가 나타나고, 지정한 이메일로만 로그인할 수 있습니다.
 
-1. 설정 탭 → **🔒 앱 로그인 (구글 계정)** 섹션
-2. **앱 접속 주소**: 위 리디렉션 URI와 정확히 일치하는 값 입력
-3. **로그인 허용 구글 이메일**: 접근을 허용할 계정 1개 입력
-4. `login_client_secret.json` 업로드
-5. **💾 설정 저장** 클릭
-
-저장 직후부터 로그인 게이트가 켜집니다. 다음 접속부터 구글 로그인 화면이 먼저 뜨고,
-지정한 이메일로 로그인해야만 대시보드가 보입니다.
-
-#### 로그인 방식
-
-"🔑 구글 계정으로 로그인" 링크를 누르면 같은 탭에서 구글 로그인 화면으로 이동했다가,
-로그인을 마치면 자동으로 이 앱으로 돌아옵니다 (새 창 없이, 모바일 포함 모든 환경에서 동일하게 동작).
-
-#### ⚠️ 주의
-
-- 이메일을 잘못 입력하고 저장하면 본인도 접근이 막힐 수 있습니다. 이 경우 서버에서
-  `.env`의 `ALLOWED_GOOGLE_EMAIL`을 수정하거나 `login_client_secret.json`을 지우면
-  게이트가 다시 꺼집니다.
-- 로그인 상태는 서명된 쿠키(`blog_auth_token`, 30일)로 유지되며, 서버가 재시작되거나
-  새로고침해도 자동으로 복원됩니다.
-
-#### 🚧 현재 상태 (2026-07-27): 로그인 게이트 임시 비활성화
-
-`app.py` 상단의 `_LOGIN_GATE_ENABLED = False` 플래그로 로그인 게이트를 꺼둔 상태입니다.
-원인 불명의 `invalid_grant` 오류가 코드를 여러 번 고쳐도 반복돼(아래 변경 이력 참고),
-사용자 요청으로 임시 비활성화했습니다. 관련 코드/모듈은 전부 그대로 남아있어
-`_LOGIN_GATE_ENABLED = True`로 한 줄만 되돌리면 즉시 재활성화됩니다.
-
-**다시 켜기 전에 확인/시도해볼 것 (우선순위 순):**
-1. Google Cloud Console → OAuth 동의 화면 → "대상" 메뉴에서 게시 상태 확인.
-   테스트 사용자를 등록해도(테스트 사용자 1명까지 확인) 여전히 `invalid_grant`가
-   났었음 — 오전엔 테스트 사용자 0명으로도 로그인이 됐었다는 사용자 증언과
-   모순되므로, 테스트유저 문제만으로는 설명 안 됨. "앱 게시"로 프로덕션 전환
-   시도해볼 것 (openid/email 스코프만 써서 구글 별도 심사 불필요).
-2. `login_client_secret.json`의 client_secret이 Google Cloud Console에서
-   재발급/삭제된 적 있는지 확인 (재발급됐다면 서버의 파일을 새로 받은 것으로 교체).
-3. 승인된 리디렉션 URI(`https://blog.superip.net`, 슬래시 없음)는 확인 완료 — 정확히 일치함.
-4. 디버깅 로그: `modules/app_auth.py`의 `complete_login()`은 한때
-   `google_auth_oauthlib.Flow` 대신 `requests`로 토큰 엔드포인트를 직접 호출해
-   구글의 원본 응답을 그대로 노출하도록 바꿨었는데(커밋 701b752), 그래도
-   `{"error": "invalid_grant", "error_description": "Bad Request"}` 라는 뭉뚱그린
-   응답만 나와 추가 단서를 못 얻었음. 다시 시도할 때 이 방식을 참고해 더 상세한
-   진단이 필요할 수 있음.
-5. PC와 모바일 모두에서 재현됐고, 시간이 지나도(수 시간) 자연 해소되지 않아
-   "구글 rate limit" 가설은 기각됨.
+⚠️ 이메일을 잘못 입력하고 저장하면 본인도 접근이 막힐 수 있습니다. 이 경우 서버에서 `.env`의 `ALLOWED_GOOGLE_EMAIL`을 수정하거나 `login_client_secret.json`을 지우면 구글 로그인 옵션이 사라지고 비밀번호 로그인만 남습니다.
 
 ---
 
@@ -313,6 +476,8 @@ Desktop app 타입은 로그인 후 실제 사이트로 자동 복귀가 안 되
 | `dalle` | 필요 (유료) | 보통 | 최고 | DALL-E 3 |
 
 **Fallback 순서**: 지정 프로바이더 → `pollinations` (키 없이 항상 시도 가능한 AI 생성 프로바이더)
+
+Google Flow(labs.google/fx/tools/flow)처럼 공식 API가 없는 도구는 직접 자동 연동하지 않고, 미디어 단계의 📋 프롬프트 복사 버튼으로 수동 연동하는 방식을 씁니다 (구글은 자동화 탐지가 엄격해 Playwright 자동화 시 계정 위험이 큼).
 
 ---
 
@@ -347,10 +512,24 @@ RuntimeError 발생
 
 ---
 
+## 🛠 자주 발생하는 문제
+
+| 증상 | 원인 / 해결 |
+|------|------------|
+| Google Blogger 인증이 풀림 (`invalid_grant`, `403` 등) | [Google Blogger OAuth 설정](#-google-blogger-oauth-설정)의 재인증 절차를 다시 밟으면 됩니다. 설정 탭 → 토큰 재발급 → 인증 URL 생성 → 승인 → 코드 붙여넣기. |
+| "AI 수정 적용" 클릭 시 오류 | 지시사항을 비워두면 적용이 안 되도록 막아뒀습니다(필수 입력). 그래도 오류가 나면 vLLM 서버/Claude API 키 상태 문제일 수 있습니다 — 실패해도 기존 본문은 그대로 남아있고, 서버 로그(`journalctl -u blog-flask -n 200`)에 전체 오류 내역이 기록되니 확인해보세요. |
+| 네이버 발행 실패 | 세션 만료 가능성 높음. [네이버 블로그 발행 설정](#-네이버-블로그-발행-설정)의 "4. 세션 만료 / 로그인 실패 시 재설정" 참고. 실패 스크린샷은 "🪵 오류 로그" 메뉴에서 확인. |
+| `/settings` 등 특정 POST 요청에서 간헐적으로 "405 Not Allowed / nginx" | nginx 자체가 아니라 앞단 WAF가 요청을 차단한 경우였음 (2026-08-01 사례). 서버 WAF 설정 쪽을 확인. |
+| 배포가 반영이 안 됨 | GitHub Actions 탭에서 워크플로우가 성공(success)했는지 확인. self-hosted runner가 오프라인이면 `queued` 상태로 멈춰 있을 수 있음 — 서버에서 러너 프로세스 상태를 확인하세요. |
+| 서비스가 안 뜸 | `sudo systemctl status blog-flask.service`로 상태 확인, `sudo journalctl -u blog-flask -n 100`으로 최근 로그 확인. |
+
+---
+
 ## 📋 주요 변경 이력
 
 | 날짜 | 변경 내용 |
 |------|-----------|
+| 2026-08-11 | README.md 전면 개편 — 아키텍처(물리/논리 구성 다이어그램), 관련 기술, 서버 설치 방법, 메뉴별 사용법(초보자용), 자주 발생하는 문제 섹션 신설. Flask 버전과 맞지 않던 "앱 로그인 게이트" 절(레거시 app.py의 `_LOGIN_GATE_ENABLED` 플래그 설명)을 실제 동작(비밀번호/구글 동시 지원, 별도 on/off 없음)에 맞게 정정. 매뉴얼(앱 내 `/manual`) 페이지도 같은 기준으로 업데이트 |
 | 2026-08-10 | 상단 바 사용자 표시를 드롭다운 메뉴로 변경 — 기본은 "🟢 로그인됨" 버튼만 노출, 클릭 시 이메일 주소와 로그아웃 버튼이 담긴 드롭다운 표시 (바깥 클릭 시 자동 닫힘) |
 | 2026-08-08 | 미디어 단계에 이미지 생성 프롬프트 복사 버튼 추가 — 생성 전 입력창 옆, 생성 후 결과 카드 모두에 📋 버튼을 달아 Google Flow 등 외부 도구에 붙여넣기 쉽게 함. (Google Flow는 공식 API가 없는 웹 전용 도구라 자동화 대신 프롬프트 복사로 수동 연동하는 방식 채택) |
 | 2026-08-08 | 네이버 수동 발행 UI 추가 — 발행 화면에 "네이버 수동 발행용 (블록별 복사)" 패널 신설. `naver_content_html`을 최상위 태그 단위(h2/p/div+img/ul 등)로 잘라(`_split_content_blocks`) 블록별 복사 버튼 제공, 이미지 블록은 다운로드/클립보드 이미지 복사 버튼 제공(fetch→blob→Clipboard API, 실패 시 새 탭 열기로 폴백). 자동 발행이 막히거나 수동으로 붙여넣고 싶을 때 사용. |
@@ -372,7 +551,7 @@ RuntimeError 발생
 | 2026-07-27 | 사이드바 메뉴가 사라지는 버그 수정 — 헤더를 CSS로 완전히 숨기면 사이드바 토글 버튼까지 사라짐 → `.streamlit/config.toml`의 `toolbarMode="minimal"`로 교체 |
 | 2026-07-27 | 로그아웃 시 쿠키 컨트롤러의 `dict.pop()`이 KeyError로 크래시하던 버그 수정 (try/except 방어) |
 | 2026-07-27 | 크롬 자동 번역 팝업 제거 (`html lang="ko"`, `translate="no"`, `<meta name="google" content="notranslate">`) |
-| 2026-07-27 | **미해결**: 로그인 시 원인 불명의 `invalid_grant` 오류가 반복 발생 (PC/모바일 모두, 시간 경과에도 미해소). 여러 차례 원인 조사·재설계·롤백을 거쳤으나 근본 원인 특정 실패 → 사용자 요청으로 로그인 게이트 임시 비활성화(`app.py`의 `_LOGIN_GATE_ENABLED = False`). 자세한 내용은 위 "🚧 현재 상태" 섹션 참고 |
+| 2026-07-27 | **미해결**: 로그인 시 원인 불명의 `invalid_grant` 오류가 반복 발생 (PC/모바일 모두, 시간 경과에도 미해소). 여러 차례 원인 조사·재설계·롤백을 거쳤으나 근본 원인 특정 실패 → 당시 사용자 요청으로 로그인 게이트 임시 비활성화(레거시 app.py 한정, 지금의 flask_app.py에는 이 플래그 자체가 없음) |
 | 2026-07-26 | 구글 로그인 팝업 방식 시도 후 모바일 호환 문제로 단순 리디렉션 방식으로 원복, 네이버 로그인을 앱 화면에서 캡차 포함 직접 처리 가능하도록 추가 |
 | 2026-07-25 | 트렌드 수집에 signal.bz 추가, 본문 가독성(줄간격·자간·여백) 개선 |
 | 2026-07-25 | 구글 계정 로그인 게이트 추가 (지정 이메일만 접근 허용), 콘텐츠 생성 시 실제 검색 결과 반영, Blogger 포스팅 삭제 기능 |

@@ -1008,7 +1008,22 @@ LOGS_TEMPLATE = """
 """
 
 MANUAL_TEMPLATE = """
-<div class="header">📚 매뉴얼</div><div class="grid2"><div class="panel"><h3>사용 흐름</h3><ol><li>트렌드 수집에서 자동 키워드를 가져오거나 수동 키워드를 입력합니다.</li><li>콘텐츠 작성에서 주제를 추천받고 본문을 생성합니다.</li><li>미디어에서 이미지 3개를 생성해 본문에 삽입합니다.</li><li>발행에서 로컬 저장, Blogger 임시저장/발행, 네이버 발행을 실행합니다.</li></ol></div><div class="panel"><h3>OAuth 팁</h3><p>Blogger는 <code>client_secret.json</code> 업로드 후 인증 URL을 열고, 최종 주소창의 <code>code=</code> 값을 앱에 붙여넣으면 <code>token.json</code>이 저장됩니다.</p><p><code>redirect_uri_mismatch</code>가 나오면 Desktop app 타입 OAuth 클라이언트를 새로 만들거나 Web application의 Authorized redirect URIs에 같은 주소를 등록하세요.</p></div></div><div class="panel"><h3>기술 스택</h3><p>Flask, vLLM/OpenAI 호환 API, Claude fallback, Pollinations/HuggingFace/DALL-E, Google Blogger API v3, Playwright 기반 네이버 발행을 사용합니다.</p></div>
+<div class="header">📚 매뉴얼</div>
+<div class="panel"><h3>사용 흐름 (한눈에 보기)</h3><p class="muted">트렌드 수집 → 키워드 선택 → 주제 추천 → 본문 생성 → 이미지 생성 → 발행(Blogger/네이버), 이 순서로 사이드바 메뉴를 위에서부터 따라가면 됩니다.</p><ol><li>트렌드 수집에서 자동 키워드를 가져오거나 수동 키워드를 입력합니다.</li><li>콘텐츠 작성에서 주제를 추천받고 본문을 생성한 뒤, 필요하면 "AI 수정 요청"으로 다듬습니다.</li><li>미디어에서 이미지 3개를 생성해 본문에 삽입합니다 (건너뛰기도 가능).</li><li>발행에서 로컬 저장, Blogger 임시저장/발행, 네이버 발행을 실행합니다.</li></ol></div>
+<div class="panel"><h3>메뉴별 사용법</h3>
+<div class="card" style="margin-bottom:10px"><h4>📊 트렌드 수집</h4><p class="muted">"트렌드 수집 시작"으로 Google News IT/테크 실시간 키워드를 가져오거나, "수동 키워드 입력"에 직접 원하는 주제를 적고 추가합니다. 체크박스로 고른 뒤 "선택한 키워드로 콘텐츠 작성"을 누릅니다.</p></div>
+<div class="card" style="margin-bottom:10px"><h4>✍️ 콘텐츠 작성</h4><p class="muted">"주제 추천 받기"로 제목 후보를 받거나 "직접 제목 입력"으로 바로 씁니다. 톤앤매너를 고르고 "본문 생성"(또는 이미지까지 한 번에 만드는 "⚡ 본문+이미지 동시 작성")을 누릅니다. 본문은 직접 수정하거나, "AI 수정 요청"에 지시사항(예: 더 친근하게)을 입력하고 "AI 수정 적용"을 누르면 AI가 다시 다듬어줍니다 — 지시사항은 반드시 입력해야 합니다.</p></div>
+<div class="card" style="margin-bottom:10px"><h4>🎨 미디어</h4><p class="muted">이미지 생성 방식을 고르고 프롬프트(설명)를 확인/수정한 뒤 "이미지 생성 & 삽입"을 누릅니다. 입력창 옆과 결과 카드의 📋 버튼으로 프롬프트를 복사해 Google Flow 등 다른 도구에도 붙여넣을 수 있습니다. 이미지가 필요 없으면 "이미지 건너뛰기"를 누릅니다.</p></div>
+<div class="card" style="margin-bottom:10px"><h4>🚀 발행</h4><p class="muted">미리보기를 확인한 뒤 로컬 저장 / Blogger 임시저장·발행 / 네이버 발행 중 선택합니다. 자동 발행이 막히면 "네이버 수동 발행용 (블록별 복사)" 패널에서 블록·이미지를 하나씩 복사해 네이버 스마트에디터에 직접 붙여넣을 수 있습니다.</p></div>
+<div class="card" style="margin-bottom:10px"><h4>📂 저장된 글</h4><p class="muted">로컬(data/)에 저장된 글 목록입니다. 제목/본문/태그를 다시 고쳐 저장하거나, 현재 작업으로 불러오거나, 바로 Blogger에 발행하거나, 삭제할 수 있습니다.</p></div>
+<div class="card" style="margin-bottom:10px"><h4>⚙️ 설정</h4><p class="muted">LLM·이미지·Blogger·네이버·로그인 관련 값을 모두 여기서 설정합니다. 저장하면 서버의 .env가 갱신됩니다. Blogger 인증, 앱 로그인용 구글 인증, 네이버 로그인도 이 화면에서 진행합니다.</p></div>
+<div class="card" style="margin-bottom:10px"><h4>🪵 오류 로그</h4><p class="muted">네이버 발행 실패 시 자동 저장된 스크린샷 목록입니다. 어디서 막혔는지 확인하고, 필요 없는 항목은 삭제할 수 있습니다.</p></div>
+</div>
+<div class="grid2">
+<div class="panel"><h3>Blogger OAuth 팁</h3><p>설정 탭에서 <code>client_secret.json</code> 업로드 → "인증 URL 생성" → 뜨는 URL을 열어 승인 → 이동한 주소창의 전체 URL(또는 <code>code=</code> 뒷부분)을 복사해 앱에 붙여넣고 "인증 완료"를 누르면 <code>token.json</code>이 저장됩니다.</p><p><code>redirect_uri_mismatch</code>가 나오면 Desktop app 타입 OAuth 클라이언트를 새로 만드세요. 인증이 풀렸을 때(<code>invalid_grant</code>, <code>403</code> 등)도 "토큰 재발급" 후 같은 순서를 다시 밟으면 됩니다.</p></div>
+<div class="panel"><h3>네이버 발행 팁</h3><p>세션이 만료되면 발행 시 오류가 뜹니다. 설정 탭에서 "네이버 로그인 시작"으로 다시 로그인하면 세션이 갱신됩니다. 캡차가 뜨면 화면에 그대로 표시되니 정답을 입력하고 제출하면 됩니다. 실패 스크린샷은 "🪵 오류 로그" 메뉴에서 확인할 수 있습니다.</p></div>
+</div>
+<div class="panel"><h3>기술 스택</h3><p>Flask, vLLM/OpenAI 호환 API, Claude fallback, Pollinations/HuggingFace/DALL-E, Google Blogger API v3, Playwright 기반 네이버 발행을 사용합니다. 배포는 GitHub Actions(self-hosted runner)로 main 브랜치 push 시 자동 실행되며, systemd(blog-flask.service)로 서비스가 관리됩니다. 자세한 아키텍처와 서버 설치 방법은 프로젝트 README.md를 참고하세요.</p></div>
 """
 
 # Jinja templates need os in settings.
