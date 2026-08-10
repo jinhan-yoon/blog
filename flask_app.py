@@ -865,6 +865,9 @@ label { display:block; font-size:13px; font-weight:700; color:#334155; margin:10
 .nvblock-content { overflow:auto; margin-bottom:8px; }
 .nvblock-content img { max-width:100%; height:auto; border-radius:8px; }
 .nvblock-actions { justify-content:flex-end; }
+.user-menu { position:relative; }
+.user-menu-dropdown { display:none; position:absolute; right:0; top:calc(100% + 6px); background:var(--panel); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); padding:12px; min-width:220px; z-index:600; }
+.user-menu-dropdown.open { display:block; }
 .muted { color:var(--muted); font-size:13px; }
 hr { border:0; border-top:1px solid var(--line); margin:18px 0; }
 code, pre { background:#f1f5f9; border-radius:6px; padding:2px 5px; }
@@ -894,7 +897,6 @@ summary { cursor:pointer; font-weight:800; }
     border-bottom:1px solid var(--line);
   }
   .bg-status { max-width:150px; }
-  .user-logout-btn { max-width:55vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   /* 햄버거 버튼: topbar 안의 일반 flex 아이템으로 배치 (더 이상 position:fixed 아님) */
   .topbar .nav-toggle-label {
     display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto;
@@ -957,7 +959,8 @@ BASE_TEMPLATE = """
 <a class="nav-link {{ 'active' if active=='logs' else '' }}" href="{{ url_for('logs') }}">🪵 오류 로그</a>
 <a class="nav-link {{ 'active' if active=='manual' else '' }}" href="{{ url_for('manual') }}">📚 매뉴얼</a>
 <div class="status"><b>API 상태</b><br>{{ '✅' if status.llm.vllm_available else '❌' }} vLLM · {{ '✅' if status.llm.claude_available else '⚪' }} Claude<br>{{ '✅' if status.blogger.ready else '❌' }} Blogger · {{ '✅' if status.naver.ready else '❌' }} 네이버<br>🖼️ {{ status.image_provider }}</div>
-</aside><main><div class="topbar"><label for="nav-toggle" class="nav-toggle-label" aria-label="메뉴 열기">☰</label>{% if ws.quick_generate_running or ws.naver_publish_running %}<a href="{{ url_for('publish') }}" class="bg-status">{% if ws.quick_generate_running %}⚡ 본문+이미지 작성 중…{% endif %}{% if ws.quick_generate_running and ws.naver_publish_running %} · {% endif %}{% if ws.naver_publish_running %}🟢 네이버 발행 중…{% endif %}</a>{% endif %}<div class="inline" style="margin-left:auto"><form method="post" action="{{ url_for('logout') }}"><button class="small user-logout-btn" type="submit" title="클릭하면 로그아웃됩니다">👤 {{ user }} · 로그아웃</button></form></div></div>
+</aside><main><div class="topbar"><label for="nav-toggle" class="nav-toggle-label" aria-label="메뉴 열기">☰</label>{% if ws.quick_generate_running or ws.naver_publish_running %}<a href="{{ url_for('publish') }}" class="bg-status">{% if ws.quick_generate_running %}⚡ 본문+이미지 작성 중…{% endif %}{% if ws.quick_generate_running and ws.naver_publish_running %} · {% endif %}{% if ws.naver_publish_running %}🟢 네이버 발행 중…{% endif %}</a>{% endif %}<div class="inline" style="margin-left:auto"><div class="user-menu"><button type="button" class="small" id="user-menu-btn">🟢 로그인됨 ▾</button><div class="user-menu-dropdown" id="user-menu-dropdown"><div class="muted" style="margin-bottom:10px;word-break:break-all">{{ user }}</div><form method="post" action="{{ url_for('logout') }}"><button class="small danger" type="submit" style="width:100%">로그아웃</button></form></div></div></div></div>
+<script>(function(){var btn=document.getElementById('user-menu-btn');var dd=document.getElementById('user-menu-dropdown');if(!btn||!dd)return;btn.addEventListener('click',function(e){e.stopPropagation();dd.classList.toggle('open');});document.addEventListener('click',function(e){if(!dd.contains(e.target)&&e.target!==btn){dd.classList.remove('open');}});})();</script>
 {% with messages = get_flashed_messages(with_categories=true) %}{% for cat,msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}{% endwith %}
 {{ body|safe }}</main></div></body></html>
 """
