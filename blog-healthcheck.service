@@ -1,0 +1,8 @@
+[Unit]
+Description=Blog Flask Health Check (watchdog)
+After=blog-flask.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/%i/blog
+ExecStart=/home/%i/blog/scripts/healthcheck.sh

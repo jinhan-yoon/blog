@@ -79,6 +79,7 @@ flowchart TB
 - `validate` 단계가 실패하면(문법 오류 등) `deploy` 단계는 아예 실행되지 않아, 깨진 코드가 운영 서버에 올라가는 걸 막아줍니다.
 - 실제 배포는 **self-hosted runner**(운영 서버에 직접 설치된 GitHub Actions 러너)가 수행합니다 — GitHub이 서버에 접속하는 게 아니라, 서버가 GitHub에 접속해서 작업을 받아옵니다.
 - 앱은 `systemd` 서비스(`blog-flask.service`)로 등록되어 있어 서버 재부팅 시에도 자동 시작되고, 죽으면 자동 재시작됩니다(`Restart=on-failure`).
+- `Restart=on-failure`는 프로세스가 **죽었을 때만** 감지합니다. 프로세스는 살아있는데 응답이 멈추는 경우(행)를 잡기 위해 `blog-healthcheck.timer`가 5분마다 `scripts/healthcheck.sh`를 실행해 `/healthz`를 호출하고, 실패하면 `blog-flask.service`를 강제 재시작합니다 — 배포 파이프라인이 매 배포마다 자동으로 등록/갱신합니다.
 - vLLM, Claude, 이미지 생성, Blogger, 네이버는 전부 **외부 서비스**이며 앱은 이들을 호출하는 클라이언트 역할만 합니다 — DB 서버 같은 건 없습니다.
 
 ### 논리 구성 (앱 내부 동작)
@@ -137,6 +138,9 @@ blog/
 ├── run.sh                     # 로컬 실행 스크립트
 ├── server-setup.sh            # 운영 서버 최초 1회 설치 스크립트
 ├── blog-flask.service         # systemd 서비스 유닛 템플릿 (%i = 배포 유저명)
+├── blog-healthcheck.service   # 헬스체크 워치독 systemd 유닛 템플릿 (%i = 배포 유저명)
+├── blog-healthcheck.timer     # 헬스체크 워치독 실행 주기(5분) 타이머
+├── scripts/healthcheck.sh     # /healthz 호출 → 실패 시 blog-flask.service 재시작
 ├── .github/workflows/deploy.yml  # 검증 + 자동 배포 파이프라인
 ├── .streamlit/config.toml     # app.py(레거시)용 Streamlit 설정
 ├── .env                       # 환경 변수 (API 키 등, git 제외)
@@ -516,6 +520,7 @@ RuntimeError 발생
 
 | 증상 | 원인 / 해결 |
 |------|------------|
+| 서비스가 응답 없이 멈춤(프로세스는 살아있는데 화면이 안 뜸) | `blog-healthcheck.timer`가 5분마다 `/healthz`를 확인해 실패 시 자동으로 `blog-flask.service`를 재시작합니다. `sudo journalctl -t blog-healthcheck -n 50`으로 재시작 이력 확인. |
 | Google Blogger 인증이 풀림 (`invalid_grant`, `403` 등) | [Google Blogger OAuth 설정](#-google-blogger-oauth-설정)의 재인증 절차를 다시 밟으면 됩니다. 설정 탭 → 토큰 재발급 → 인증 URL 생성 → 승인 → 코드 붙여넣기. |
 | "AI 수정 적용" 클릭 시 오류 | 지시사항을 비워두면 적용이 안 되도록 막아뒀습니다(필수 입력). 그래도 오류가 나면 vLLM 서버/Claude API 키 상태 문제일 수 있습니다 — 실패해도 기존 본문은 그대로 남아있고, 서버 로그(`journalctl -u blog-flask -n 200`)에 전체 오류 내역이 기록되니 확인해보세요. |
 | 네이버 발행 실패 | 세션 만료 가능성 높음. [네이버 블로그 발행 설정](#-네이버-블로그-발행-설정)의 "4. 세션 만료 / 로그인 실패 시 재설정" 참고. 실패 스크린샷은 "🪵 오류 로그" 메뉴에서 확인. |
@@ -529,6 +534,7 @@ RuntimeError 발생
 
 | 날짜 | 변경 내용 |
 |------|-----------|
+| 2026-08-22 | 서비스 자체 점검(헬스체크) 기능 추가 — `/healthz`가 데이터 디렉토리 쓰기 가능 여부 등을 실제로 점검해 정상이면 200/`ok:true`, 비정상이면 503/`ok:false`를 반환하도록 개선(기존엔 항상 `ok:true` 고정 응답). `scripts/healthcheck.sh` + `blog-healthcheck.service`/`.timer`로 5분마다 `/healthz`를 호출해 실패 시 `blog-flask.service`를 자동 재시작하는 워치독 추가. `.github/workflows/deploy.yml`과 `server-setup.sh`에 워치독 등록 단계 포함(매 배포마다 자동 갱신). |
 | 2026-08-11 | README.md 전면 개편 — 아키텍처(물리/논리 구성 다이어그램), 관련 기술, 서버 설치 방법, 메뉴별 사용법(초보자용), 자주 발생하는 문제 섹션 신설. Flask 버전과 맞지 않던 "앱 로그인 게이트" 절(레거시 app.py의 `_LOGIN_GATE_ENABLED` 플래그 설명)을 실제 동작(비밀번호/구글 동시 지원, 별도 on/off 없음)에 맞게 정정. 매뉴얼(앱 내 `/manual`) 페이지도 같은 기준으로 업데이트 |
 | 2026-08-10 | 상단 바 사용자 표시를 드롭다운 메뉴로 변경 — 기본은 "🟢 로그인됨" 버튼만 노출, 클릭 시 이메일 주소와 로그아웃 버튼이 담긴 드롭다운 표시 (바깥 클릭 시 자동 닫힘) |
 | 2026-08-08 | 미디어 단계에 이미지 생성 프롬프트 복사 버튼 추가 — 생성 전 입력창 옆, 생성 후 결과 카드 모두에 📋 버튼을 달아 Google Flow 등 외부 도구에 붙여넣기 쉽게 함. (Google Flow는 공식 API가 없는 웹 전용 도구라 자동화 대신 프롬프트 복사로 수동 연동하는 방식 채택) |

@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import threading
+import time
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -50,6 +51,7 @@ ERROR_DIR = Path("naver_errors")
 app = Flask(__name__)
 app.secret_key = os.getenv("APP_SESSION_SECRET") or os.getenv("FLASK_SECRET_KEY") or "change-me-in-env"
 
+_START_TIME = time.monotonic()
 _workspaces: dict[str, dict] = {}
 
 DEFAULT_WORKSPACE = {
@@ -785,7 +787,31 @@ def manual():
 
 @app.route("/healthz")
 def healthz():
-    return {"ok": True, "app": "flask-blog-dashboard"}
+    """워치독(scripts/healthcheck.sh)이 주기적으로 호출하는 자체 점검 엔드포인트.
+    프로세스가 살아있어도 응답이 멈춰있거나 데이터 디스크 쓰기가 막힌 경우를
+    감지하기 위한 용도이므로, 외부 API(LLM/Blogger/네이버) 호출은 하지 않는다.
+    """
+    checks: dict[str, bool | str] = {}
+    ok = True
+
+    try:
+        DATA_DIR.mkdir(exist_ok=True)
+        probe = DATA_DIR / ".healthz_probe"
+        probe.write_text(str(time.time()), encoding="utf-8")
+        probe.unlink()
+        checks["data_dir_writable"] = True
+    except OSError as exc:
+        checks["data_dir_writable"] = False
+        checks["data_dir_error"] = str(exc)
+        ok = False
+
+    body = {
+        "ok": ok,
+        "app": "flask-blog-dashboard",
+        "uptime_seconds": round(time.monotonic() - _START_TIME, 1),
+        "checks": checks,
+    }
+    return body, (200 if ok else 503)
 
 
 def _status() -> dict:

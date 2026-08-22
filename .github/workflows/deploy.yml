@@ -83,6 +83,17 @@ jobs:
             echo "⚠️ .env 가 없어 .env.example 에서 복사했습니다. 실제 값을 설정해주세요."
           fi
 
+      - name: Register healthcheck watchdog (systemd timer)
+        run: |
+          chmod +x "$DEPLOY_PATH/scripts/healthcheck.sh"
+          sed "s|WorkingDirectory=.*|WorkingDirectory=$DEPLOY_PATH|g; \
+               s|ExecStart=.*|ExecStart=$DEPLOY_PATH/scripts/healthcheck.sh|g" \
+            "$DEPLOY_PATH/blog-healthcheck.service" \
+            | sudo tee /etc/systemd/system/blog-healthcheck.service > /dev/null
+          sudo cp "$DEPLOY_PATH/blog-healthcheck.timer" /etc/systemd/system/blog-healthcheck.timer
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now blog-healthcheck.timer
+
       - name: Restart services
         run: |
           sudo systemctl disable --now blog-streamlit.service 2>/dev/null || true
